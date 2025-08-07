@@ -1,15 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, Key, Copy, Eye, EyeOff, FolderOpen, FileText, Download } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { ConfigEditor } from "./ConfigEditor";
+import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Edit, Trash2, Key, Copy, Eye, EyeOff, FolderOpen } from "lucide-react";
 
 interface ApiKey {
   id: string;
@@ -52,7 +50,13 @@ interface UpdateApiKeyRequest {
   unsafe_html?: boolean;
 }
 
-export function ApiKeyManager() {
+interface ApiKeyManagerProps {
+  onOpenCreateDialog?: () => void;
+  onViewConfig?: () => void;
+  onBackup?: () => void;
+}
+
+export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -63,6 +67,14 @@ export function ApiKeyManager() {
   const [configPath, setConfigPath] = useState("~/.claude/settings.json");
   const [configContent, setConfigContent] = useState("");
   const [configLoading, setConfigLoading] = useState(false);
+  const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
+  
+  // Expose methods to parent component
+  useImperativeHandle(ref, () => ({
+    onOpenCreateDialog: () => setIsCreateDialogOpen(true),
+    onViewConfig: handleViewConfig,
+    onBackup: handleBackup,
+  }));
   
   const [createForm, setCreateForm] = useState<CreateApiKeyRequest>({
     name: "",
@@ -105,10 +117,6 @@ export function ApiKeyManager() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleConfigSaved = () => {
-    loadApiKeys();
   };
 
   const handleBackup = async () => {
@@ -163,55 +171,13 @@ export function ApiKeyManager() {
     if (!createForm.name || !createForm.key) return;
 
     try {
-      // 生成UUID作为密钥ID
-      const generateUUID = () => {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-          const r = Math.random() * 16 | 0;
-          const v = c === 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
-      };
-      
-      const apiKeyId = generateUUID();
-      const now = new Date().toISOString();
-      
-      // 创建Claude配置格式的对象
-      const claudeConfig = {
-        [apiKeyId]: {
-          id: apiKeyId,
+      // 使用新的SQLite后端函数
+      await invoke<ApiKey>("create_api_key", {
+        request: {
           name: createForm.name,
           key: createForm.key,
-          description: createForm.description || "",
-          api_url: createForm.api_url || "https://api.anthropic.com",
-          model: createForm.model || "claude-3-5-sonnet-20241022",
-          max_tokens: createForm.max_tokens || 4096,
-          temperature: createForm.temperature || 0.7,
-          top_p: createForm.top_p || 0.9,
-          timeout: createForm.timeout || 30000,
-          proxy_url: createForm.proxy_url || undefined,
-          verbose: createForm.verbose || false,
-          stream: createForm.stream || true,
-          unsafe_html: createForm.unsafe_html || false,
-          created_at: now,
-          updated_at: now
+          description: createForm.description || ""
         }
-      };
-      
-      // 获取现有配置并合并
-      const existingConfig = await invoke<string>("get_config_file_content");
-      let mergedConfig;
-      
-      try {
-        const parsedExisting = JSON.parse(existingConfig);
-        mergedConfig = { ...parsedExisting, ...claudeConfig };
-      } catch {
-        // 如果现有配置无效，只使用新配置
-        mergedConfig = claudeConfig;
-      }
-      
-      // 保存合并后的配置
-      await invoke<boolean>("save_config_file_content", { 
-        content: JSON.stringify(mergedConfig, null, 2) 
       });
       
       // 重置表单
@@ -232,8 +198,12 @@ export function ApiKeyManager() {
       });
       setIsCreateDialogOpen(false);
       loadApiKeys();
+      
+      // 显示成功消息
+      toast.success("API密钥已成功创建");
     } catch (error) {
       console.error("Failed to create API key:", error);
+      toast.error("创建API密钥失败，请重试");
     }
   };
 
@@ -241,35 +211,14 @@ export function ApiKeyManager() {
     if (!editingKey) return;
 
     try {
-      // 获取现有配置
-      const existingConfig = await invoke<string>("get_config_file_content");
-      const parsedExisting = JSON.parse(existingConfig);
-      
-      // 更新特定密钥的配置
-      const updatedConfig = {
-        ...parsedExisting,
-        [editingKey.id]: {
-          ...parsedExisting[editingKey.id],
+      // 使用新的SQLite后端函数
+      await invoke<ApiKey>("update_api_key", {
+        id: editingKey.id,
+        request: {
           name: editForm.name || editingKey.name,
           key: editForm.key || editingKey.key,
-          description: editForm.description !== undefined ? editForm.description : editingKey.description,
-          api_url: editForm.api_url || (parsedExisting[editingKey.id]?.api_url || "https://api.anthropic.com"),
-          model: editForm.model || (parsedExisting[editingKey.id]?.model || "claude-3-5-sonnet-20241022"),
-          max_tokens: editForm.max_tokens || (parsedExisting[editingKey.id]?.max_tokens || 4096),
-          temperature: editForm.temperature || (parsedExisting[editingKey.id]?.temperature || 0.7),
-          top_p: editForm.top_p || (parsedExisting[editingKey.id]?.top_p || 0.9),
-          timeout: editForm.timeout || (parsedExisting[editingKey.id]?.timeout || 30000),
-          proxy_url: editForm.proxy_url !== undefined ? editForm.proxy_url : parsedExisting[editingKey.id]?.proxy_url,
-          verbose: editForm.verbose !== undefined ? editForm.verbose : (parsedExisting[editingKey.id]?.verbose || false),
-          stream: editForm.stream !== undefined ? editForm.stream : (parsedExisting[editingKey.id]?.stream || true),
-          unsafe_html: editForm.unsafe_html !== undefined ? editForm.unsafe_html : (parsedExisting[editingKey.id]?.unsafe_html || false),
-          updated_at: new Date().toISOString()
+          description: editForm.description !== undefined ? editForm.description : editingKey.description
         }
-      };
-      
-      // 保存更新后的配置
-      await invoke<boolean>("save_config_file_content", { 
-        content: JSON.stringify(updatedConfig, null, 2) 
       });
       
       setIsEditDialogOpen(false);
@@ -290,8 +239,12 @@ export function ApiKeyManager() {
         unsafe_html: false
       });
       loadApiKeys();
+      
+      // 显示成功消息
+      toast.success("API密钥已成功更新");
     } catch (error) {
       console.error("Failed to update API key:", error);
+      toast.error("更新API密钥失败，请重试");
     }
   };
 
@@ -299,21 +252,18 @@ export function ApiKeyManager() {
     if (!confirm("确定要删除这个API密钥吗？")) return;
 
     try {
-      // 获取现有配置
-      const existingConfig = await invoke<string>("get_config_file_content");
-      const parsedExisting = JSON.parse(existingConfig);
+      // 使用新的SQLite后端函数
+      const deleted = await invoke<boolean>("delete_api_key", { id });
       
-      // 删除指定密钥
-      const { [id]: _, ...remainingConfig } = parsedExisting;
-      
-      // 保存更新后的配置
-      await invoke<boolean>("save_config_file_content", { 
-        content: JSON.stringify(remainingConfig, null, 2) 
-      });
-      
-      loadApiKeys();
+      if (deleted) {
+        loadApiKeys();
+        toast.success("API密钥已成功删除");
+      } else {
+        toast.error("未找到要删除的API密钥");
+      }
     } catch (error) {
       console.error("Failed to delete API key:", error);
+      toast.error("删除API密钥失败，请重试");
     }
   };
 
@@ -344,6 +294,14 @@ export function ApiKeyManager() {
     }));
   };
 
+  const handleSwitchToggle = (id: string) => {
+    if (activeKeyId === id) {
+      setActiveKeyId(null);
+    } else {
+      setActiveKeyId(id);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
   };
@@ -357,6 +315,7 @@ export function ApiKeyManager() {
     return key.substring(0, 8) + "..." + key.substring(key.length - 4);
   };
 
+  
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -366,191 +325,70 @@ export function ApiKeyManager() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm" onClick={handleViewConfig}>
-            <FileText className="mr-2 h-4 w-4" />
-            查看
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleBackup}>
-            <Download className="mr-2 h-4 w-4" />
-            备份
-          </Button>
-          <ConfigEditor onConfigSaved={handleConfigSaved} />
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                添加
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>添加新的API密钥配置</DialogTitle>
-                <DialogDescription>
-                  创建一个新的Claude API密钥配置，包含完整的API参数设置
-                </DialogDescription>
-              </DialogHeader>
+    <>
+      <div className="space-y-6">
+        {/* 添加按钮已移至标题栏 */}
+        
+        {/* 创建对话框 */}
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>添加新的API密钥配置</DialogTitle>
+              <DialogDescription>
+                创建一个新的Claude API密钥配置
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
               <div className="space-y-4">
-                {/* 基本信息 */}
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium text-muted-foreground">基本信息</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium block mb-2">名称 *</label>
-                      <Input
-                        value={createForm.name}
-                        onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                        placeholder="输入配置名称"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium block mb-2">API密钥 *</label>
-                      <Input
-                        value={createForm.key}
-                        onChange={(e) => setCreateForm({ ...createForm, key: e.target.value })}
-                        placeholder="sk-ant-api03-..."
-                        type="password"
-                      />
-                    </div>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium block mb-2">API URL</label>
+                    <label className="text-sm font-medium block mb-2">名称 *</label>
                     <Input
-                      value={createForm.api_url}
-                      onChange={(e) => setCreateForm({ ...createForm, api_url: e.target.value })}
-                      placeholder="https://api.anthropic.com"
+                      value={createForm.name}
+                      onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                      placeholder="输入配置名称"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium block mb-2">描述</label>
-                    <Textarea
-                      value={createForm.description}
-                      onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                      placeholder="输入描述信息（可选）"
-                      className="min-h-[60px]"
+                    <label className="text-sm font-medium block mb-2">API密钥 *</label>
+                    <Input
+                      value={createForm.key}
+                      onChange={(e) => setCreateForm({ ...createForm, key: e.target.value })}
+                      placeholder="sk-ant-api03-..."
+                      type="password"
                     />
                   </div>
                 </div>
-
-                {/* API配置 */}
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium text-muted-foreground">API配置</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium block mb-2">模型</label>
-                      <Input
-                        value={createForm.model}
-                        onChange={(e) => setCreateForm({ ...createForm, model: e.target.value })}
-                        placeholder="claude-3-5-sonnet-20241022"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-sm font-medium block mb-2">最大令牌数</label>
-                      <Input
-                        type="number"
-                        value={createForm.max_tokens}
-                        onChange={(e) => setCreateForm({ ...createForm, max_tokens: parseInt(e.target.value) || 4096 })}
-                        placeholder="4096"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium block mb-2">温度</label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={createForm.temperature}
-                        onChange={(e) => setCreateForm({ ...createForm, temperature: parseFloat(e.target.value) || 0.7 })}
-                        placeholder="0.7"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium block mb-2">Top P</label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={createForm.top_p}
-                        onChange={(e) => setCreateForm({ ...createForm, top_p: parseFloat(e.target.value) || 0.9 })}
-                        placeholder="0.9"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium block mb-2">超时时间 (ms)</label>
-                      <Input
-                        type="number"
-                        value={createForm.timeout}
-                        onChange={(e) => setCreateForm({ ...createForm, timeout: parseInt(e.target.value) || 30000 })}
-                        placeholder="30000"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium block mb-2">代理URL</label>
-                      <Input
-                        value={createForm.proxy_url}
-                        onChange={(e) => setCreateForm({ ...createForm, proxy_url: e.target.value })}
-                        placeholder="http://proxy:port"
-                      />
-                    </div>
-                  </div>
+                <div>
+                  <label className="text-sm font-medium block mb-2">API URL</label>
+                  <Input
+                    value={createForm.api_url}
+                    onChange={(e) => setCreateForm({ ...createForm, api_url: e.target.value })}
+                    placeholder="https://api.anthropic.com"
+                  />
                 </div>
-
-                {/* 高级选项 */}
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium text-muted-foreground">高级选项</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id="verbose"
-                        checked={createForm.verbose}
-                        onChange={(e) => setCreateForm({ ...createForm, verbose: e.target.checked })}
-                        className="rounded"
-                      />
-                      <label htmlFor="verbose" className="text-sm">详细日志</label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id="stream"
-                        checked={createForm.stream}
-                        onChange={(e) => setCreateForm({ ...createForm, stream: e.target.checked })}
-                        className="rounded"
-                      />
-                      <label htmlFor="stream" className="text-sm">流式输出</label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id="unsafe_html"
-                        checked={createForm.unsafe_html}
-                        onChange={(e) => setCreateForm({ ...createForm, unsafe_html: e.target.checked })}
-                        className="rounded"
-                      />
-                      <label htmlFor="unsafe_html" className="text-sm">允许HTML</label>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end space-x-2 pt-4 border-t">
-                  <Button variant="outline" size="sm" onClick={() => setIsCreateDialogOpen(false)}>
-                    取消
-                  </Button>
-                  <Button size="sm" onClick={handleCreate} disabled={!createForm.name || !createForm.key}>
-                    创建配置
-                  </Button>
+                <div>
+                  <label className="text-sm font-medium block mb-2">备注说明</label>
+                  <Textarea
+                    value={createForm.description}
+                    onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                    placeholder="输入描述信息（可选）"
+                    className="min-h-[60px]"
+                  />
                 </div>
               </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+
+              <div className="flex justify-end space-x-2 pt-4 border-t">
+                <Button variant="outline" size="sm" onClick={() => setIsCreateDialogOpen(false)}>
+                  取消
+                </Button>
+                <Button size="sm" onClick={handleCreate} disabled={!createForm.name || !createForm.key}>
+                  创建配置
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       
       <div className="flex flex-col gap-2">
@@ -564,7 +402,7 @@ export function ApiKeyManager() {
           />
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             className="px-3"
             onClick={async () => {
               try {
@@ -583,99 +421,95 @@ export function ApiKeyManager() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>API密钥列表</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {apiKeys.length === 0 ? (
-            <div className="text-center py-8">
-              <Key className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-2 text-sm font-medium">暂无API密钥</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                点击上方"添加"按钮创建您的第一个API密钥
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="whitespace-nowrap">名称</TableHead>
-                    <TableHead className="whitespace-nowrap">API密钥</TableHead>
-                    <TableHead className="whitespace-nowrap">模型</TableHead>
-                    <TableHead className="whitespace-nowrap">描述</TableHead>
-                    <TableHead className="whitespace-nowrap">创建时间</TableHead>
-                    <TableHead className="whitespace-nowrap text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {apiKeys.map((key) => (
-                    <TableRow key={key.id}>
-                      <TableCell className="font-medium whitespace-nowrap">{key.name}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2 min-w-0">
-                          <code className="text-sm bg-muted px-2 py-1 rounded truncate max-w-[150px]">
-                            {showKeys[key.id] ? key.key : maskKey(key.key)}
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => toggleShowKey(key.id)}
-                          >
-                            {showKeys[key.id] ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(key.key)}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <Badge variant="outline" className="text-xs">
-                          {(key as any).model || "claude-3-5-sonnet"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap max-w-[200px] truncate" title={key.description || ""}>
-                        {key.description || "-"}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{formatDate(key.created_at)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(key)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(key.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {apiKeys.length === 0 ? (
+          <div className="text-center py-8 border border-dashed border-border rounded-lg">
+            <Key className="mx-auto h-12 w-12 text-muted-foreground" />
+            <h3 className="mt-2 text-sm font-medium">暂无API密钥</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              点击上方"添加"按钮创建您的第一个API密钥
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {apiKeys.map((key) => (
+              <Card key={key.id} className="p-3 w-full">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <Switch
+                        checked={activeKeyId === key.id}
+                        onCheckedChange={() => handleSwitchToggle(key.id)}
+                      />
+                      <h3 className="text-sm font-medium truncate">{key.name}</h3>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="text-xs text-muted-foreground">密钥:</span>
+                      <code className="text-xs bg-muted px-2 py-1 rounded font-mono truncate flex-1">
+                        {showKeys[key.id] ? key.key : maskKey(key.key)}
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleShowKey(key.id)}
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                      >
+                        {showKeys[key.id] ? (
+                          <EyeOff className="h-3 w-3" />
+                        ) : (
+                          <Eye className="h-3 w-3" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyToClipboard(key.key)}
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    
+                    {key.description && (
+                      <div className="mb-1">
+                        <span className="text-xs text-muted-foreground">描述: </span>
+                        <span className="text-xs">{key.description}</span>
+                      </div>
+                    )}
+                    
+                    <div className="text-xs text-muted-foreground">
+                      创建时间: {formatDate(key.created_at)}
+                    </div>
+                  </div>
+                  
+                  <div className="flex space-x-1 ml-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditDialog(key)}
+                      className="h-6 w-6 p-0"
+                    >
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(key.id)}
+                      className="h-6 w-6 p-0"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
 
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>编辑API密钥配置</DialogTitle>
             <DialogDescription>
@@ -683,34 +517,22 @@ export function ApiKeyManager() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* 基本信息 */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-muted-foreground">基本信息</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium block mb-2">名称 *</label>
-                  <Input
-                    value={editForm.name || ""}
-                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                    placeholder="输入配置名称"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">API密钥 *</label>
-                  <Input
-                    value={editForm.key || ""}
-                    onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
-                    placeholder="sk-ant-api03-..."
-                    type="password"
-                  />
-                </div>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="text-sm font-medium block mb-2">名称 *</label>
+                <Input
+                  value={editForm.name || ""}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  placeholder="输入配置名称"
+                />
               </div>
               <div>
-                <label className="text-sm font-medium block mb-2">API URL</label>
+                <label className="text-sm font-medium block mb-2">API密钥 *</label>
                 <Input
-                  value={editForm.api_url || ""}
-                  onChange={(e) => setEditForm({ ...editForm, api_url: e.target.value })}
-                  placeholder="https://api.anthropic.com"
+                  value={editForm.key || ""}
+                  onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
+                  placeholder="sk-ant-api03-..."
+                  type="password"
                 />
               </div>
               <div>
@@ -721,108 +543,6 @@ export function ApiKeyManager() {
                   placeholder="输入描述信息（可选）"
                   className="min-h-[60px]"
                 />
-              </div>
-            </div>
-
-            {/* API配置 */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-muted-foreground">API配置</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium block mb-2">模型</label>
-                  <Input
-                    value={editForm.model || ""}
-                    onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
-                    placeholder="claude-3-5-sonnet-20241022"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-sm font-medium block mb-2">最大令牌数</label>
-                  <Input
-                    type="number"
-                    value={editForm.max_tokens || ""}
-                    onChange={(e) => setEditForm({ ...editForm, max_tokens: parseInt(e.target.value) || 4096 })}
-                    placeholder="4096"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">温度</label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={editForm.temperature || ""}
-                    onChange={(e) => setEditForm({ ...editForm, temperature: parseFloat(e.target.value) || 0.7 })}
-                    placeholder="0.7"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">Top P</label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={editForm.top_p || ""}
-                    onChange={(e) => setEditForm({ ...editForm, top_p: parseFloat(e.target.value) || 0.9 })}
-                    placeholder="0.9"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium block mb-2">超时时间 (ms)</label>
-                  <Input
-                    type="number"
-                    value={editForm.timeout || ""}
-                    onChange={(e) => setEditForm({ ...editForm, timeout: parseInt(e.target.value) || 30000 })}
-                    placeholder="30000"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">代理URL</label>
-                  <Input
-                    value={editForm.proxy_url || ""}
-                    onChange={(e) => setEditForm({ ...editForm, proxy_url: e.target.value })}
-                    placeholder="http://proxy:port"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 高级选项 */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-muted-foreground">高级选项</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="edit-verbose"
-                    checked={editForm.verbose || false}
-                    onChange={(e) => setEditForm({ ...editForm, verbose: e.target.checked })}
-                    className="rounded"
-                  />
-                  <label htmlFor="edit-verbose" className="text-sm">详细日志</label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="edit-stream"
-                    checked={editForm.stream || false}
-                    onChange={(e) => setEditForm({ ...editForm, stream: e.target.checked })}
-                    className="rounded"
-                  />
-                  <label htmlFor="edit-stream" className="text-sm">流式输出</label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="edit-unsafe_html"
-                    checked={editForm.unsafe_html || false}
-                    onChange={(e) => setEditForm({ ...editForm, unsafe_html: e.target.checked })}
-                    className="rounded"
-                  />
-                  <label htmlFor="edit-unsafe_html" className="text-sm">允许HTML</label>
-                </div>
               </div>
             </div>
 
@@ -875,6 +595,6 @@ export function ApiKeyManager() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
-}
+});

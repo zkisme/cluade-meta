@@ -7,9 +7,10 @@ type ActiveView = 'overview' | 'claude-code' | 'claude-router' | 'environment';
 
 interface MainContentProps {
   activeView: ActiveView;
+  apiKeyManagerRef?: React.RefObject<any>;
 }
 
-export function MainContent({ activeView }: MainContentProps) {
+export function MainContent({ activeView, apiKeyManagerRef }: MainContentProps) {
   const updateTitle = (title: string) => {
     const titleElement = document.getElementById('main-title');
     if (titleElement) {
@@ -35,7 +36,12 @@ export function MainContent({ activeView }: MainContentProps) {
   const renderContent = () => {
     switch (activeView) {
       case 'claude-code':
-        return <ApiKeyManager />;
+        return <ApiKeyManager 
+          ref={apiKeyManagerRef}
+          onOpenCreateDialog={() => {}}
+          onViewConfig={() => {}}
+          onBackup={() => {}}
+        />;
       
       case 'claude-router':
         return (

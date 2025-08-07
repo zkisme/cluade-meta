@@ -132,7 +132,7 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="default">
+        <Button variant="outline" size="sm">
           <Settings className="mr-2 h-4 w-4" />
           高级
         </Button>

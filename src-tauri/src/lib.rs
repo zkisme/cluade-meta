@@ -1,9 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use rusqlite::{Connection, Result, OptionalExtension};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiKey {
@@ -44,6 +44,66 @@ pub struct ClaudeSettings {
     pub unsafe_html: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfigPath {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateConfigPathRequest {
+    pub name: String,
+    pub path: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateConfigPathRequest {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub description: Option<String>,
+}
+
+fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
+    let api_dir = app.path().app_data_dir().unwrap().join("api_keys");
+    fs::create_dir_all(&api_dir).map_err(|_e| rusqlite::Error::InvalidColumnType(0, "Failed to create directory".to_string(), rusqlite::types::Type::Null))?;
+    
+    let db_path = api_dir.join("claude_keys.db");
+    let conn = Connection::open(db_path)?;
+    
+    // Create the api_keys table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+
+    // Create the config_paths table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS config_paths (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+    
+    Ok(conn)
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -54,16 +114,7 @@ async fn create_api_key(
     app: tauri::AppHandle,
     request: CreateApiKeyRequest,
 ) -> Result<ApiKey, String> {
-    let api_dir = app.path().app_data_dir().unwrap().join("api_keys");
-    fs::create_dir_all(&api_dir).map_err(|e| e.to_string())?;
-
-    let api_keys_file = api_dir.join("claude_keys.json");
-    let mut api_keys: HashMap<String, ApiKey> = if api_keys_file.exists() {
-        let content = fs::read_to_string(&api_keys_file).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| e.to_string())?
-    } else {
-        HashMap::new()
-    };
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let api_key = ApiKey {
@@ -75,27 +126,38 @@ async fn create_api_key(
         updated_at: now,
     };
 
-    api_keys.insert(api_key.id.clone(), api_key.clone());
-
-    let content = serde_json::to_string_pretty(&api_keys).map_err(|e| e.to_string())?;
-    fs::write(&api_keys_file, content).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO api_keys (id, name, key, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        (&api_key.id, &api_key.name, &api_key.key, &api_key.description, &api_key.created_at, &api_key.updated_at),
+    ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
 }
 
 #[tauri::command]
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
-    let api_dir = app.path().app_data_dir().unwrap().join("api_keys");
-    let api_keys_file = api_dir.join("claude_keys.json");
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    if !api_keys_file.exists() {
-        return Ok(Vec::new());
+    let mut stmt = conn.prepare("SELECT id, name, key, description, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let api_keys = stmt.query_map([], |row| {
+        Ok(ApiKey {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            key: row.get(2)?,
+            description: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for api_key in api_keys {
+        result.push(api_key.map_err(|e| e.to_string())?);
     }
 
-    let content = fs::read_to_string(&api_keys_file).map_err(|e| e.to_string())?;
-    let api_keys: HashMap<String, ApiKey> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    Ok(api_keys.values().cloned().collect())
+    Ok(result)
 }
 
 #[tauri::command]
@@ -104,17 +166,25 @@ async fn update_api_key(
     id: String,
     request: UpdateApiKeyRequest,
 ) -> Result<ApiKey, String> {
-    let api_dir = app.path().app_data_dir().unwrap().join("api_keys");
-    let api_keys_file = api_dir.join("claude_keys.json");
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    if !api_keys_file.exists() {
-        return Err("API key not found".to_string());
-    }
+    // Check if the API key exists
+    let existing_key: Option<ApiKey> = conn.query_row(
+        "SELECT id, name, key, description, created_at, updated_at FROM api_keys WHERE id = ?1",
+        [&id],
+        |row| {
+            Ok(ApiKey {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                key: row.get(2)?,
+                description: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    ).optional().map_err(|e| e.to_string())?;
 
-    let content = fs::read_to_string(&api_keys_file).map_err(|e| e.to_string())?;
-    let mut api_keys: HashMap<String, ApiKey> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    let mut api_key = api_keys.get(&id).ok_or("API key not found")?.clone();
+    let mut api_key = existing_key.ok_or("API key not found")?;
 
     if let Some(name) = request.name {
         api_key.name = name;
@@ -127,34 +197,24 @@ async fn update_api_key(
     }
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
-    api_keys.insert(id.clone(), api_key.clone());
-
-    let content = serde_json::to_string_pretty(&api_keys).map_err(|e| e.to_string())?;
-    fs::write(&api_keys_file, content).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE api_keys SET name = ?1, key = ?2, description = ?3, updated_at = ?4 WHERE id = ?5",
+        (&api_key.name, &api_key.key, &api_key.description, &api_key.updated_at, &id),
+    ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
 }
 
 #[tauri::command]
 async fn delete_api_key(app: tauri::AppHandle, id: String) -> Result<bool, String> {
-    let api_dir = app.path().app_data_dir().unwrap().join("api_keys");
-    let api_keys_file = api_dir.join("claude_keys.json");
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    if !api_keys_file.exists() {
-        return Ok(false);
-    }
+    let affected_rows = conn.execute(
+        "DELETE FROM api_keys WHERE id = ?1",
+        [&id],
+    ).map_err(|e| e.to_string())?;
 
-    let content = fs::read_to_string(&api_keys_file).map_err(|e| e.to_string())?;
-    let mut api_keys: HashMap<String, ApiKey> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    let removed = api_keys.remove(&id).is_some();
-
-    if removed {
-        let content = serde_json::to_string_pretty(&api_keys).map_err(|e| e.to_string())?;
-        fs::write(&api_keys_file, content).map_err(|e| e.to_string())?;
-    }
-
-    Ok(removed)
+    Ok(affected_rows > 0)
 }
 
 #[tauri::command]
@@ -287,10 +347,10 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn backup_config_file(backupFilename: String) -> Result<bool, String> {
+async fn backup_config_file(backup_filename: String) -> Result<bool, String> {
     use std::fs;
     
-    println!("Backup function called with filename: {}", backupFilename);
+    println!("Backup function called with filename: {}", backup_filename);
     
     // Get home directory
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
@@ -312,7 +372,7 @@ async fn backup_config_file(backupFilename: String) -> Result<bool, String> {
     fs::create_dir_all(&backup_dir).map_err(|e| format!("Failed to create backup directory: {}", e))?;
     
     // Create backup file path
-    let backup_file = backup_dir.join(backupFilename);
+    let backup_file = backup_dir.join(backup_filename);
     println!("Backup file path: {:?}", backup_file);
     
     // Write backup file
@@ -321,6 +381,114 @@ async fn backup_config_file(backupFilename: String) -> Result<bool, String> {
     
     println!("Backup completed successfully");
     Ok(true)
+}
+
+#[tauri::command]
+async fn create_config_path(
+    app: tauri::AppHandle,
+    request: CreateConfigPathRequest,
+) -> Result<ConfigPath, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let config_path = ConfigPath {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: request.name,
+        path: request.path,
+        description: request.description,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    conn.execute(
+        "INSERT INTO config_paths (id, name, path, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        (&config_path.id, &config_path.name, &config_path.path, &config_path.description, &config_path.created_at, &config_path.updated_at),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(config_path)
+}
+
+#[tauri::command]
+async fn get_config_paths(app: tauri::AppHandle) -> Result<Vec<ConfigPath>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, path, description, created_at, updated_at FROM config_paths ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let config_paths = stmt.query_map([], |row| {
+        Ok(ConfigPath {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            path: row.get(2)?,
+            description: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for config_path in config_paths {
+        result.push(config_path.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn update_config_path(
+    app: tauri::AppHandle,
+    id: String,
+    request: UpdateConfigPathRequest,
+) -> Result<ConfigPath, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    // Check if the config path exists
+    let existing_path: Option<ConfigPath> = conn.query_row(
+        "SELECT id, name, path, description, created_at, updated_at FROM config_paths WHERE id = ?1",
+        [&id],
+        |row| {
+            Ok(ConfigPath {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                description: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    ).optional().map_err(|e| e.to_string())?;
+
+    let mut config_path = existing_path.ok_or("Config path not found")?;
+
+    if let Some(name) = request.name {
+        config_path.name = name;
+    }
+    if let Some(path) = request.path {
+        config_path.path = path;
+    }
+    if let Some(description) = request.description {
+        config_path.description = Some(description);
+    }
+    config_path.updated_at = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE config_paths SET name = ?1, path = ?2, description = ?3, updated_at = ?4 WHERE id = ?5",
+        (&config_path.name, &config_path.path, &config_path.description, &config_path.updated_at, &id),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(config_path)
+}
+
+#[tauri::command]
+async fn delete_config_path(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let affected_rows = conn.execute(
+        "DELETE FROM config_paths WHERE id = ?1",
+        [&id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(affected_rows > 0)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -339,7 +507,11 @@ pub fn run() {
             get_claude_settings,
             save_claude_settings,
             open_file_dialog,
-            backup_config_file
+            backup_config_file,
+            create_config_path,
+            get_config_paths,
+            update_config_path,
+            delete_config_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

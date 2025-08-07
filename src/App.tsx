@@ -12,7 +12,6 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  TooltipProvider,
 } from "@/components/ui/tooltip";
 import { Plus, FileText, Download, MoreVertical } from "lucide-react";
 import {
@@ -28,7 +27,8 @@ import {
   SidebarProvider,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Settings, Code, Router, Variable, Home } from "lucide-react";
+import { Settings, Code, Router, Variable, Home, FolderOpen } from "lucide-react";
+import { ConfigPathManager } from "@/components/ConfigPathManager";
 
 // Menu items.
 const items = [
@@ -54,6 +54,7 @@ type ActiveView = "overview" | "claude-code" | "claude-router" | "environment";
 function AppContent() {
   const [activeView, setActiveView] = useState<ActiveView>("overview");
   const apiKeyManagerRef = useRef<any>(null);
+  const [showConfigPathManager, setShowConfigPathManager] = useState(false);
 
   const handleMenuClick = (key: string) => {
     setActiveView(key as ActiveView);
@@ -184,9 +185,13 @@ function AppContent() {
                     <Download className="mr-2 h-4 w-4" />
                     备份
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowConfigPathManager(true)}>
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    设置
+                  </DropdownMenuItem>
                   <DropdownMenuItem>
                     <Settings className="mr-2 h-4 w-4" />
-                    高级设置
+                    高级编辑
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -199,6 +204,11 @@ function AppContent() {
           apiKeyManagerRef={apiKeyManagerRef}
         />
       </main>
+      
+      <ConfigPathManager 
+        open={showConfigPathManager} 
+        onOpenChange={setShowConfigPathManager} 
+      />
     </div>
   );
 }
