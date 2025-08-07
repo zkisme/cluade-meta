@@ -13,7 +13,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Plus, FileText, Download, MoreVertical } from "lucide-react";
+import { Plus, FileText, Download, Upload, MoreVertical } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -55,7 +55,7 @@ function AppContent() {
   const [activeView, setActiveView] = useState<ActiveView>("overview");
   const apiKeyManagerRef = useRef<any>(null);
   const [showConfigPathManager, setShowConfigPathManager] = useState(false);
-
+  
   const handleMenuClick = (key: string) => {
     setActiveView(key as ActiveView);
   };
@@ -75,6 +75,18 @@ function AppContent() {
   const handleBackup = () => {
     if (apiKeyManagerRef.current) {
       apiKeyManagerRef.current.onBackup?.();
+    }
+  };
+
+  const handleRestore = () => {
+    if (apiKeyManagerRef.current) {
+      apiKeyManagerRef.current.onRestore?.();
+    }
+  };
+
+  const handleOpenAdvancedEdit = () => {
+    if (apiKeyManagerRef.current) {
+      apiKeyManagerRef.current.onOpenAdvancedEdit?.();
     }
   };
 
@@ -185,11 +197,15 @@ function AppContent() {
                     <Download className="mr-2 h-4 w-4" />
                     备份
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleRestore}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    恢复
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setShowConfigPathManager(true)}>
                     <FolderOpen className="mr-2 h-4 w-4" />
                     设置
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleOpenAdvancedEdit}>
                     <Settings className="mr-2 h-4 w-4" />
                     高级编辑
                   </DropdownMenuItem>

@@ -2,12 +2,12 @@ import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Edit, Trash2, Key, Copy, Eye, EyeOff, FolderOpen } from "lucide-react";
+import { Edit, Trash2, Key, Copy, Eye, EyeOff, Upload, Clock } from "lucide-react";
+import { ConfigEditor } from "@/components/ConfigEditor";
+import { KeyFormDialog } from "@/components/KeyFormDialog";
 
 interface ApiKey {
   id: string;
@@ -18,96 +18,50 @@ interface ApiKey {
   updated_at: string;
 }
 
-interface CreateApiKeyRequest {
-  name: string;
-  key: string;
-  description?: string;
-  api_url?: string;
-  model?: string;
-  max_tokens?: number;
-  temperature?: number;
-  top_p?: number;
-  timeout?: number;
-  proxy_url?: string;
-  verbose?: boolean;
-  stream?: boolean;
-  unsafe_html?: boolean;
+interface BackupFile {
+  filename: string;
+  path: string;
+  size: number;
+  created_at: string;
 }
 
-interface UpdateApiKeyRequest {
-  name?: string;
-  key?: string;
-  description?: string;
-  api_url?: string;
-  model?: string;
-  max_tokens?: number;
-  temperature?: number;
-  top_p?: number;
-  timeout?: number;
-  proxy_url?: string;
-  verbose?: boolean;
-  stream?: boolean;
-  unsafe_html?: boolean;
-}
 
 interface ApiKeyManagerProps {
   onOpenCreateDialog?: () => void;
   onViewConfig?: () => void;
   onBackup?: () => void;
+  onOpenAdvancedEdit?: () => void;
 }
 
 export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isKeyFormDialogOpen, setIsKeyFormDialogOpen] = useState(false);
   const [isConfigViewDialogOpen, setIsConfigViewDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKey | null>(null);
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-  const [configPath, setConfigPath] = useState("~/.claude/settings.json");
   const [configContent, setConfigContent] = useState("");
   const [configLoading, setConfigLoading] = useState(false);
   const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
+  const [isConfigEditorOpen, setIsConfigEditorOpen] = useState(false);
+  const [backupFiles, setBackupFiles] = useState<BackupFile[]>([]);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
   
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
-    onOpenCreateDialog: () => setIsCreateDialogOpen(true),
+    onOpenCreateDialog: () => {
+      setEditingKey(null);
+      setIsKeyFormDialogOpen(true);
+    },
     onViewConfig: handleViewConfig,
     onBackup: handleBackup,
+    onRestore: handleRestore,
+    onOpenAdvancedEdit: () => {
+      setIsConfigEditorOpen(true);
+    },
   }));
   
-  const [createForm, setCreateForm] = useState<CreateApiKeyRequest>({
-    name: "",
-    key: "",
-    description: "",
-    api_url: "https://api.anthropic.com",
-    model: "claude-3-5-sonnet-20241022",
-    max_tokens: 4096,
-    temperature: 0.7,
-    top_p: 0.9,
-    timeout: 30000,
-    proxy_url: "",
-    verbose: false,
-    stream: true,
-    unsafe_html: false
-  });
-
-  const [editForm, setEditForm] = useState<UpdateApiKeyRequest>({
-    name: "",
-    key: "",
-    description: "",
-    api_url: "",
-    model: "",
-    max_tokens: 4096,
-    temperature: 0.7,
-    top_p: 0.9,
-    timeout: 30000,
-    proxy_url: "",
-    verbose: false,
-    stream: true,
-    unsafe_html: false
-  });
-
+  
   const loadApiKeys = async () => {
     try {
       const keys = await invoke<ApiKey[]>("get_api_keys");
@@ -144,6 +98,32 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     }
   };
 
+  const handleRestore = async () => {
+    try {
+      const files = await invoke<BackupFile[]>("get_backup_files");
+      setBackupFiles(files);
+      setIsRestoreDialogOpen(true);
+    } catch (error) {
+      console.error("Failed to get backup files:", error);
+      toast.error("获取备份文件失败，请重试");
+    }
+  };
+
+  const restoreFromBackup = async (filename: string) => {
+    try {
+      const result = await invoke<boolean>("restore_config_file", { backupFilename: filename });
+      if (result) {
+        toast.success(`配置文件已从备份 ${filename} 恢复成功`);
+        setIsRestoreDialogOpen(false);
+        // 刷新API密钥列表
+        loadApiKeys();
+      }
+    } catch (error) {
+      console.error("Failed to restore config file:", error);
+      toast.error(`恢复失败，请重试\n错误: ${(error as any)?.message || error}`);
+    }
+  };
+
   const loadConfigContent = async () => {
     setConfigLoading(true);
     try {
@@ -167,87 +147,7 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     loadApiKeys();
   }, []);
 
-  const handleCreate = async () => {
-    if (!createForm.name || !createForm.key) return;
-
-    try {
-      // 使用新的SQLite后端函数
-      await invoke<ApiKey>("create_api_key", {
-        request: {
-          name: createForm.name,
-          key: createForm.key,
-          description: createForm.description || ""
-        }
-      });
-      
-      // 重置表单
-      setCreateForm({
-        name: "",
-        key: "",
-        description: "",
-        api_url: "https://api.anthropic.com",
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 4096,
-        temperature: 0.7,
-        top_p: 0.9,
-        timeout: 30000,
-        proxy_url: "",
-        verbose: false,
-        stream: true,
-        unsafe_html: false
-      });
-      setIsCreateDialogOpen(false);
-      loadApiKeys();
-      
-      // 显示成功消息
-      toast.success("API密钥已成功创建");
-    } catch (error) {
-      console.error("Failed to create API key:", error);
-      toast.error("创建API密钥失败，请重试");
-    }
-  };
-
-  const handleUpdate = async () => {
-    if (!editingKey) return;
-
-    try {
-      // 使用新的SQLite后端函数
-      await invoke<ApiKey>("update_api_key", {
-        id: editingKey.id,
-        request: {
-          name: editForm.name || editingKey.name,
-          key: editForm.key || editingKey.key,
-          description: editForm.description !== undefined ? editForm.description : editingKey.description
-        }
-      });
-      
-      setIsEditDialogOpen(false);
-      setEditingKey(null);
-      setEditForm({
-        name: "",
-        key: "",
-        description: "",
-        api_url: "",
-        model: "",
-        max_tokens: 4096,
-        temperature: 0.7,
-        top_p: 0.9,
-        timeout: 30000,
-        proxy_url: "",
-        verbose: false,
-        stream: true,
-        unsafe_html: false
-      });
-      loadApiKeys();
-      
-      // 显示成功消息
-      toast.success("API密钥已成功更新");
-    } catch (error) {
-      console.error("Failed to update API key:", error);
-      toast.error("更新API密钥失败，请重试");
-    }
-  };
-
+  
   const handleDelete = async (id: string) => {
     if (!confirm("确定要删除这个API密钥吗？")) return;
 
@@ -269,22 +169,7 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
 
   const openEditDialog = (key: ApiKey) => {
     setEditingKey(key);
-    setEditForm({
-      name: key.name,
-      key: key.key,
-      description: key.description,
-      api_url: (key as any).api_url || "https://api.anthropic.com",
-      model: (key as any).model || "claude-3-5-sonnet-20241022",
-      max_tokens: (key as any).max_tokens || 4096,
-      temperature: (key as any).temperature || 0.7,
-      top_p: (key as any).top_p || 0.9,
-      timeout: (key as any).timeout || 30000,
-      proxy_url: (key as any).proxy_url || "",
-      verbose: (key as any).verbose || false,
-      stream: (key as any).stream || true,
-      unsafe_html: (key as any).unsafe_html || false
-    });
-    setIsEditDialogOpen(true);
+    setIsKeyFormDialogOpen(true);
   };
 
   const toggleShowKey = (id: string) => {
@@ -310,6 +195,16 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     return new Date(dateString).toLocaleString('zh-CN');
   };
 
+  const formatBackupTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString('zh-CN');
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
   const maskKey = (key: string) => {
     if (key.length <= 8) return key;
     return key.substring(0, 8) + "..." + key.substring(key.length - 4);
@@ -329,97 +224,7 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
       <div className="space-y-6">
         {/* 添加按钮已移至标题栏 */}
         
-        {/* 创建对话框 */}
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>添加新的API密钥配置</DialogTitle>
-              <DialogDescription>
-                创建一个新的Claude API密钥配置
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium block mb-2">名称 *</label>
-                    <Input
-                      value={createForm.name}
-                      onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                      placeholder="输入配置名称"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium block mb-2">API密钥 *</label>
-                    <Input
-                      value={createForm.key}
-                      onChange={(e) => setCreateForm({ ...createForm, key: e.target.value })}
-                      placeholder="sk-ant-api03-..."
-                      type="password"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">API URL</label>
-                  <Input
-                    value={createForm.api_url}
-                    onChange={(e) => setCreateForm({ ...createForm, api_url: e.target.value })}
-                    placeholder="https://api.anthropic.com"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-2">备注说明</label>
-                  <Textarea
-                    value={createForm.description}
-                    onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                    placeholder="输入描述信息（可选）"
-                    className="min-h-[60px]"
-                  />
-                </div>
               </div>
-
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <Button variant="outline" size="sm" onClick={() => setIsCreateDialogOpen(false)}>
-                  取消
-                </Button>
-                <Button size="sm" onClick={handleCreate} disabled={!createForm.name || !createForm.key}>
-                  创建配置
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-      
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium">配置文件路径</label>
-        <div className="flex gap-2">
-          <Input
-            value={configPath}
-            onChange={(e) => setConfigPath(e.target.value)}
-            placeholder="输入配置文件路径"
-            className="flex-1"
-          />
-          <Button
-            variant="outline"
-            size="default"
-            className="px-3"
-            onClick={async () => {
-              try {
-                const selected = await invoke<string>("open_file_dialog");
-                if (selected) {
-                  setConfigPath(selected);
-                }
-              } catch (error) {
-                console.error("Failed to open file dialog:", error);
-                toast.error('文件选择功能暂不可用，请手动输入路径');
-              }
-            }}
-          >
-            <FolderOpen className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
 
       <div className="space-y-4">
         {apiKeys.length === 0 ? (
@@ -508,55 +313,15 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
         )}
       </div>
 
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>编辑API密钥配置</DialogTitle>
-            <DialogDescription>
-              修改Claude API密钥的配置信息
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="text-sm font-medium block mb-2">名称 *</label>
-                <Input
-                  value={editForm.name || ""}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  placeholder="输入配置名称"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium block mb-2">API密钥 *</label>
-                <Input
-                  value={editForm.key || ""}
-                  onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
-                  placeholder="sk-ant-api03-..."
-                  type="password"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium block mb-2">描述</label>
-                <Textarea
-                  value={editForm.description || ""}
-                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                  placeholder="输入描述信息（可选）"
-                  className="min-h-[60px]"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-2 pt-4 border-t">
-              <Button variant="outline" size="sm" onClick={() => setIsEditDialogOpen(false)}>
-                取消
-              </Button>
-              <Button size="sm" onClick={handleUpdate} disabled={!editForm.name || !editForm.key}>
-                更新配置
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <KeyFormDialog 
+        open={isKeyFormDialogOpen}
+        onOpenChange={setIsKeyFormDialogOpen}
+        editingKey={editingKey}
+        onKeySaved={() => {
+          loadApiKeys();
+          setEditingKey(null);
+        }}
+      />
 
       <Dialog open={isConfigViewDialogOpen} onOpenChange={setIsConfigViewDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
@@ -595,6 +360,73 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* 恢复对话框 */}
+      <Dialog open={isRestoreDialogOpen} onOpenChange={setIsRestoreDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>恢复配置文件</DialogTitle>
+            <DialogDescription>
+              选择一个备份文件来恢复配置文件
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {backupFiles.length === 0 ? (
+              <div className="text-center py-8 border border-dashed border-border rounded-lg">
+                <Clock className="mx-auto h-12 w-12 text-muted-foreground" />
+                <h3 className="mt-2 text-sm font-medium">暂无备份文件</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  请先备份配置文件
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {backupFiles.map((file) => (
+                  <Card key={file.filename} className="p-3 w-full">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <h3 className="text-sm font-medium truncate">{file.filename}</h3>
+                        </div>
+                        <div className="flex items-center space-x-4 text-xs text-muted-foreground">
+                          <span>大小: {formatFileSize(file.size)}</span>
+                          <span>创建时间: {formatBackupTime(file.created_at)}</span>
+                        </div>
+                      </div>
+                      <div className="flex space-x-1 ml-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => restoreFromBackup(file.filename)}
+                          className="h-8 px-3"
+                        >
+                          <Upload className="h-3 w-3 mr-1" />
+                          恢复
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button variant="outline" size="sm" onClick={() => setIsRestoreDialogOpen(false)}>
+                关闭
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 配置编辑器组件 */}
+      <ConfigEditor 
+        open={isConfigEditorOpen}
+        onOpenChange={setIsConfigEditorOpen}
+        onConfigSaved={() => {
+          // 当配置保存后刷新API密钥列表
+          loadApiKeys();
+        }} 
+      />
     </>
   );
 });

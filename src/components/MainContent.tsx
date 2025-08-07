@@ -41,6 +41,7 @@ export function MainContent({ activeView, apiKeyManagerRef }: MainContentProps) 
           onOpenCreateDialog={() => {}}
           onViewConfig={() => {}}
           onBackup={() => {}}
+          onOpenAdvancedEdit={() => {}}
         />;
       
       case 'claude-router':

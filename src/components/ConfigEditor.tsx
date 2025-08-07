@@ -1,18 +1,24 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Editor } from "@monaco-editor/react";
-import { Settings, Save, Download, Upload, FileJson, AlertTriangle, CheckCircle } from "lucide-react";
+import { Save, FileJson, AlertTriangle, CheckCircle } from "lucide-react";
 
 interface ConfigEditorProps {
   onConfigSaved?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function ConfigEditor({ onConfigSaved, open, onOpenChange }: ConfigEditorProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  // 支持外部控制
+  const isOpen = open ?? internalOpen;
+  const setIsOpen = onOpenChange ?? setInternalOpen;
   const [configContent, setConfigContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -89,39 +95,6 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
     }
   };
 
-  const handleDownload = () => {
-    const blob = new Blob([configContent], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "claude-keys.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      setConfigContent(content);
-      setHasChanges(content !== originalContent);
-      
-      // 验证上传的JSON
-      try {
-        JSON.parse(content);
-        setIsValidJson(true);
-        setValidationError("");
-      } catch (error) {
-        setIsValidJson(false);
-        setValidationError(error instanceof Error ? error.message : "Invalid JSON");
-      }
-    };
-    reader.readAsText(file);
-  };
-
   const handleReset = () => {
     setConfigContent(originalContent);
     setHasChanges(false);
@@ -131,13 +104,7 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Settings className="mr-2 h-4 w-4" />
-          高级
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
@@ -162,7 +129,7 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
           </div>
         </DialogHeader>
 
-        <div className="flex-1 flex flex-col space-y-4">
+        <div className="flex-1 flex flex-col space-y-4 overflow-hidden">
           {/* 工具栏 */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 bg-muted rounded-md">
             <div className="flex flex-wrap items-center gap-2">
@@ -173,28 +140,7 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
                 disabled={!isValidJson}
               >
                 <FileJson className="mr-2 h-4 w-4" />
-                格式化JSON
-              </Button>
-              
-              <label htmlFor="upload-config">
-                <Button variant="outline" size="default" asChild>
-                  <span>
-                    <Upload className="mr-2 h-4 w-4" />
-                    上传文件
-                  </span>
-                </Button>
-              </label>
-              <input
-                id="upload-config"
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={handleUpload}
-              />
-              
-              <Button variant="outline" size="default" onClick={handleDownload}>
-                <Download className="mr-2 h-4 w-4" />
-                下载文件
+                格式化
               </Button>
               
               {hasChanges && (
@@ -231,7 +177,7 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
           )}
 
           {/* 编辑器 */}
-          <div className="flex-1 border rounded-md overflow-hidden">
+          <div className="border rounded-md" style={{ height: '60vh' }}>
             <Editor
               height="100%"
               defaultLanguage="json"
@@ -243,46 +189,22 @@ export function ConfigEditor({ onConfigSaved }: ConfigEditorProps) {
                 fontSize: 14,
                 lineNumbers: "on",
                 roundedSelection: false,
-                scrollBeyondLastLine: false,
+                scrollBeyondLastLine: true,
                 automaticLayout: true,
                 wordWrap: "on",
                 folding: true,
                 showFoldingControls: "always",
                 formatOnPaste: true,
                 formatOnType: true,
+                scrollbar: {
+                  verticalScrollbarSize: 8,
+                  horizontalScrollbarSize: 8,
+                },
               }}
             />
           </div>
 
-          {/* 帮助信息 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">配置文件格式说明</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground space-y-2">
-                <p>配置文件使用JSON格式，包含以下结构：</p>
-                <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-{`{
-  "api_key_id": {
-    "id": "api_key_id",
-    "name": "密钥名称",
-    "key": "sk-ant-api03-xxxxxxxx",
-    "description": "描述信息",
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z"
-  }
-}`}
-                </pre>
-                <p>• <code>id</code>: 唯一标识符，必须为UUID格式</p>
-                <p>• <code>name</code>: 密钥名称，用于显示</p>
-                <p>• <code>key</code>: Claude API密钥</p>
-                <p>• <code>description</code>: 可选的描述信息</p>
-                <p>• <code>created_at</code>/<code>updated_at</code>: ISO格式时间戳</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+          </div>
       </DialogContent>
     </Dialog>
   );

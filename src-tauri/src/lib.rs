@@ -31,8 +31,8 @@ pub struct UpdateApiKeyRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeSettings {
-    pub api_key: Option<String>,
-    pub api_url: Option<String>,
+    pub anthropic_auth_token: Option<String>,
+    pub anthropic_base_url: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
@@ -96,6 +96,16 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             path TEXT NOT NULL,
             description TEXT,
             created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+
+    // Create the current_config_path table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS current_config_path (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )",
         (),
@@ -274,8 +284,8 @@ async fn get_claude_settings(path: String) -> Result<String, String> {
         
         // Create default settings
         let default_settings = ClaudeSettings {
-            api_key: None,
-            api_url: Some("https://api.anthropic.com".to_string()),
+            anthropic_auth_token: None,
+            anthropic_base_url: Some("https://api.anthropic.com".to_string()),
             model: Some("claude-3-5-sonnet-20241022".to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -380,6 +390,104 @@ async fn backup_config_file(backup_filename: String) -> Result<bool, String> {
         .map_err(|e| format!("Failed to write backup file: {}", e))?;
     
     println!("Backup completed successfully");
+    Ok(true)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupFile {
+    pub filename: String,
+    pub path: String,
+    pub size: u64,
+    pub created_at: String,
+}
+
+#[tauri::command]
+async fn get_backup_files() -> Result<Vec<BackupFile>, String> {
+    use std::fs;
+    
+    // Get home directory
+    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let claude_dir = home_dir.join(".claude");
+    let backup_dir = claude_dir.join("back");
+    
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let mut backup_files = Vec::new();
+    
+    for entry in fs::read_dir(&backup_dir).map_err(|e| format!("Failed to read backup directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+        
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+            let metadata = fs::metadata(&path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
+            let filename = path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            
+            let created_at = metadata.created()
+                .map(|time| {
+                    use std::time::SystemTime;
+                    let duration_since_epoch = time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+                    chrono::DateTime::from_timestamp(duration_since_epoch.as_secs() as i64, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or("unknown".to_string())
+                })
+                .unwrap_or("unknown".to_string());
+            
+            backup_files.push(BackupFile {
+                filename: filename.clone(),
+                path: path.to_string_lossy().to_string(),
+                size: metadata.len(),
+                created_at,
+            });
+        }
+    }
+    
+    // Sort by creation time (newest first)
+    backup_files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    
+    Ok(backup_files)
+}
+
+#[tauri::command]
+async fn restore_config_file(backup_filename: String) -> Result<bool, String> {
+    use std::fs;
+    
+    println!("Restore function called with filename: {}", backup_filename);
+    
+    // Get home directory
+    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let claude_dir = home_dir.join(".claude");
+    let backup_dir = claude_dir.join("back");
+    let backup_file = backup_dir.join(backup_filename);
+    let settings_file = claude_dir.join("settings.json");
+    
+    println!("Backup file path: {:?}", backup_file);
+    println!("Settings file path: {:?}", settings_file);
+    
+    if !backup_file.exists() {
+        return Err("备份文件不存在".to_string());
+    }
+    
+    // Read backup file content
+    let content = fs::read_to_string(&backup_file)
+        .map_err(|e| format!("Failed to read backup file: {}", e))?;
+    
+    // Validate JSON format
+    serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("备份文件格式无效: {}", e))?;
+    
+    // Create directory if it doesn't exist
+    fs::create_dir_all(&claude_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    
+    // Write to settings file
+    fs::write(&settings_file, content)
+        .map_err(|e| format!("Failed to restore settings file: {}", e))?;
+    
+    println!("Restore completed successfully");
     Ok(true)
 }
 
@@ -491,6 +599,55 @@ async fn delete_config_path(app: tauri::AppHandle, id: String) -> Result<bool, S
     Ok(affected_rows > 0)
 }
 
+#[tauri::command]
+async fn save_config_path(app: tauri::AppHandle, path: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    let now = chrono::Utc::now().to_rfc3339();
+    
+    println!("Saving config path: {}", path);
+    
+    // Delete any existing config path
+    conn.execute("DELETE FROM current_config_path", ())
+        .map_err(|e| e.to_string())?;
+    
+    // Insert the new config path
+    conn.execute(
+        "INSERT INTO current_config_path (path, updated_at) VALUES (?1, ?2)",
+        (&path, &now),
+    ).map_err(|e| e.to_string())?;
+    
+    println!("Config path saved successfully");
+    Ok(true)
+}
+
+#[tauri::command]
+async fn get_config_path(app: tauri::AppHandle) -> Result<String, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    let path: Option<String> = conn.query_row(
+        "SELECT path FROM current_config_path ORDER BY updated_at DESC LIMIT 1",
+        [],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    
+    let path_clone = path.clone();
+    let result = path.unwrap_or_else(|| "~/.claude/settings.json".to_string());
+    
+    // Check if there are any records in the table
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM current_config_path",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    
+    println!("Number of records in current_config_path: {}", count);
+    println!("Retrieved config path: {:?}", path_clone);
+    println!("Returning config path: {}", result);
+    
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -508,10 +665,14 @@ pub fn run() {
             save_claude_settings,
             open_file_dialog,
             backup_config_file,
+            get_backup_files,
+            restore_config_file,
             create_config_path,
             get_config_paths,
             update_config_path,
-            delete_config_path
+            delete_config_path,
+            save_config_path,
+            get_config_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
