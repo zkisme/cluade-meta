@@ -1,26 +1,34 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { MainContent } from "@/components/MainContent";
 import { Toaster } from "@/components/ui/sonner";
-import { 
-  Sidebar, 
-  SidebarContent, 
-  SidebarGroup, 
-  SidebarGroupContent, 
-  SidebarGroupLabel, 
-  SidebarHeader, 
-  SidebarMenu, 
-  SidebarMenuButton, 
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
+import { Plus, FileText, Download, MoreVertical } from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarRail
+  SidebarRail,
 } from "@/components/ui/sidebar";
-import { 
-  Settings, 
-  Code, 
-  Router, 
-  Variable,
-  Home
-} from "lucide-react";
+import { Settings, Code, Router, Variable, Home } from "lucide-react";
 
 // Menu items.
 const items = [
@@ -41,13 +49,32 @@ const items = [
   },
 ];
 
-type ActiveView = 'overview' | 'claude-code' | 'claude-router' | 'environment';
+type ActiveView = "overview" | "claude-code" | "claude-router" | "environment";
 
 function AppContent() {
-  const [activeView, setActiveView] = useState<ActiveView>('overview');
+  const [activeView, setActiveView] = useState<ActiveView>("overview");
+  const apiKeyManagerRef = useRef<any>(null);
 
   const handleMenuClick = (key: string) => {
     setActiveView(key as ActiveView);
+  };
+
+  const handleOpenCreateDialog = () => {
+    if (apiKeyManagerRef.current) {
+      apiKeyManagerRef.current.onOpenCreateDialog?.();
+    }
+  };
+
+  const handleViewConfig = () => {
+    if (apiKeyManagerRef.current) {
+      apiKeyManagerRef.current.onViewConfig?.();
+    }
+  };
+
+  const handleBackup = () => {
+    if (apiKeyManagerRef.current) {
+      apiKeyManagerRef.current.onBackup?.();
+    }
   };
 
   return (
@@ -71,7 +98,7 @@ function AppContent() {
               <SidebarMenu>
                 {items.map((item) => (
                   <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton 
+                    <SidebarMenuButton
                       asChild
                       isActive={activeView === item.key}
                       onClick={() => handleMenuClick(item.key)}
@@ -86,16 +113,16 @@ function AppContent() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-          
+
           <SidebarGroup>
             <SidebarGroupLabel>系统信息</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton 
+                  <SidebarMenuButton
                     asChild
-                    isActive={activeView === 'overview'}
-                    onClick={() => setActiveView('overview')}
+                    isActive={activeView === "overview"}
+                    onClick={() => setActiveView("overview")}
                   >
                     <a href="#" className="flex items-center gap-2">
                       <Home />
@@ -109,15 +136,68 @@ function AppContent() {
         </SidebarContent>
         <SidebarRail />
       </Sidebar>
-      
+
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12 border-b">
+        <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12 border-b">
           <div className="flex items-center gap-2 px-4">
-            <h1 className="text-xl font-semibold" id="main-title">概览</h1>
+            <h1 className="text-xl font-semibold" id="main-title">
+              概览
+            </h1>
           </div>
+
+          {activeView === "claude-code" && (
+            <div className="flex items-center gap-1 px-4">
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleOpenCreateDialog}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={5}>
+                  <p>添加</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button variant="ghost" size="sm" onClick={handleViewConfig}>
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={5}>
+                  <p>查看</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger>
+                  <Button variant="ghost" size="sm">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleBackup}>
+                    <Download className="mr-2 h-4 w-4" />
+                    备份
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Settings className="mr-2 h-4 w-4" />
+                    高级设置
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
         </header>
-        
-        <MainContent activeView={activeView} />
+
+        <MainContent
+          activeView={activeView}
+          apiKeyManagerRef={apiKeyManagerRef}
+        />
       </main>
     </div>
   );
