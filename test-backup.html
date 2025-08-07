@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backup Test</title>
+</head>
+<body>
+    <button onclick="testBackup()">Test Backup</button>
+    <script>
+        const { invoke } = window.__TAURI__.core;
+        
+        async function testBackup() {
+            try {
+                const timestamp = new Date();
+                const year = timestamp.getFullYear();
+                const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+                const day = String(timestamp.getDate()).padStart(2, '0');
+                const hour = String(timestamp.getHours()).padStart(2, '0');
+                const minute = String(timestamp.getMinutes()).padStart(2, '0');
+                
+                const backupFileName = `settings_${year}${month}${day}_${hour}_${minute}.json`;
+                console.log("Generated backup filename:", backupFileName);
+                
+                const result = await invoke("backup_config_file", { backup_filename: backupFileName });
+                console.log("Backup result:", result);
+                alert(`Backup completed: ${backupFileName}`);
+            } catch (error) {
+                console.error("Backup failed:", error);
+                alert('Backup failed: ' + error);
+            }
+        }
+    </script>
+</body>
+</html>
