@@ -11,6 +11,7 @@ interface ApiKey {
   name: string;
   key: string;
   description?: string;
+  anthropic_base_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -65,16 +66,16 @@ export const KeyFormDialog = ({ open, onOpenChange, editingKey, onKeySaved }: Ke
           name: editingKey.name,
           anthropic_auth_token: editingKey.key,
           description: editingKey.description,
-          anthropic_base_url: (editingKey as any).anthropic_base_url || "https://api.anthropic.com",
-          model: (editingKey as any).model || "claude-3-5-sonnet-20241022",
-          max_tokens: (editingKey as any).max_tokens || 4096,
-          temperature: (editingKey as any).temperature || 0.7,
-          top_p: (editingKey as any).top_p || 0.9,
-          timeout: (editingKey as any).timeout || 30000,
-          proxy_url: (editingKey as any).proxy_url || "",
-          verbose: (editingKey as any).verbose || false,
-          stream: (editingKey as any).stream || true,
-          unsafe_html: (editingKey as any).unsafe_html || false
+          anthropic_base_url: editingKey.anthropic_base_url || "https://api.anthropic.com",
+          model: "claude-3-5-sonnet-20241022",
+          max_tokens: 4096,
+          temperature: 0.7,
+          top_p: 0.9,
+          timeout: 30000,
+          proxy_url: "",
+          verbose: false,
+          stream: true,
+          unsafe_html: false
         });
       } else {
         setFormData({
@@ -111,7 +112,8 @@ export const KeyFormDialog = ({ open, onOpenChange, editingKey, onKeySaved }: Ke
           request: {
             name: formData.name,
             key: formData.anthropic_auth_token,
-            description: formData.description
+            description: formData.description,
+            anthropic_base_url: formData.anthropic_base_url
           }
         });
         toast.success("API密钥已成功更新");
@@ -121,7 +123,8 @@ export const KeyFormDialog = ({ open, onOpenChange, editingKey, onKeySaved }: Ke
           request: {
             name: formData.name,
             key: formData.anthropic_auth_token,
-            description: formData.description || ""
+            description: formData.description || "",
+            anthropic_base_url: formData.anthropic_base_url
           }
         });
         toast.success("API密钥已成功创建");

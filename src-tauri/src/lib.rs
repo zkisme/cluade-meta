@@ -11,6 +11,7 @@ pub struct ApiKey {
     pub name: String,
     pub key: String,
     pub description: Option<String>,
+    pub anthropic_base_url: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -20,6 +21,7 @@ pub struct CreateApiKeyRequest {
     pub name: String,
     pub key: String,
     pub description: Option<String>,
+    pub anthropic_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +29,7 @@ pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
     pub key: Option<String>,
     pub description: Option<String>,
+    pub anthropic_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -42,6 +45,26 @@ pub struct ClaudeSettings {
     pub verbose: Option<bool>,
     pub stream: Option<bool>,
     pub unsafe_html: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EnvConfig {
+    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
+    pub CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PermissionsConfig {
+    pub allow: Option<Vec<String>>,
+    pub deny: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfigFileFormat {
+    pub env: EnvConfig,
+    pub permissions: PermissionsConfig,
+    pub apiKeyHelper: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -82,6 +105,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             name TEXT NOT NULL,
             key TEXT NOT NULL,
             description TEXT,
+            anthropic_base_url TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )",
@@ -110,6 +134,18 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         )",
         (),
     )?;
+
+    // Create the backups table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            content TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )",
+        (),
+    )?;
     
     Ok(conn)
 }
@@ -132,13 +168,14 @@ async fn create_api_key(
         name: request.name,
         key: request.key,
         description: request.description,
+        anthropic_base_url: request.anthropic_base_url,
         created_at: now.clone(),
         updated_at: now,
     };
 
     conn.execute(
-        "INSERT INTO api_keys (id, name, key, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        (&api_key.id, &api_key.name, &api_key.key, &api_key.description, &api_key.created_at, &api_key.updated_at),
+        "INSERT INTO api_keys (id, name, key, description, anthropic_base_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        (&api_key.id, &api_key.name, &api_key.key, &api_key.description, &api_key.anthropic_base_url, &api_key.created_at, &api_key.updated_at),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -148,7 +185,7 @@ async fn create_api_key(
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, key, description, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, key, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
@@ -157,8 +194,9 @@ async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
             name: row.get(1)?,
             key: row.get(2)?,
             description: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            anthropic_base_url: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -180,7 +218,7 @@ async fn update_api_key(
 
     // Check if the API key exists
     let existing_key: Option<ApiKey> = conn.query_row(
-        "SELECT id, name, key, description, created_at, updated_at FROM api_keys WHERE id = ?1",
+        "SELECT id, name, key, description, anthropic_base_url, created_at, updated_at FROM api_keys WHERE id = ?1",
         [&id],
         |row| {
             Ok(ApiKey {
@@ -188,8 +226,9 @@ async fn update_api_key(
                 name: row.get(1)?,
                 key: row.get(2)?,
                 description: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                anthropic_base_url: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         },
     ).optional().map_err(|e| e.to_string())?;
@@ -205,11 +244,14 @@ async fn update_api_key(
     if let Some(description) = request.description {
         api_key.description = Some(description);
     }
+    if let Some(anthropic_base_url) = request.anthropic_base_url {
+        api_key.anthropic_base_url = Some(anthropic_base_url);
+    }
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE api_keys SET name = ?1, key = ?2, description = ?3, updated_at = ?4 WHERE id = ?5",
-        (&api_key.name, &api_key.key, &api_key.description, &api_key.updated_at, &id),
+        "UPDATE api_keys SET name = ?1, key = ?2, description = ?3, anthropic_base_url = ?4, updated_at = ?5 WHERE id = ?6",
+        (&api_key.name, &api_key.key, &api_key.description, &api_key.anthropic_base_url, &api_key.updated_at, &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -228,15 +270,25 @@ async fn delete_api_key(app: tauri::AppHandle, id: String) -> Result<bool, Strin
 }
 
 #[tauri::command]
-async fn get_config_file_content() -> Result<String, String> {
+async fn get_config_file_content(app: tauri::AppHandle) -> Result<String, String> {
     
-    // Get home directory
-    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
-    let claude_dir = home_dir.join(".claude");
-    let settings_file = claude_dir.join("settings.json");
+    // Get the configured config path or use default
+    let config_path = get_config_path(app.clone()).await?;
+    
+    // Expand the ~ to home directory if needed
+    let expanded_path = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    let settings_file = expanded_path;
 
     if !settings_file.exists() {
-        fs::create_dir_all(&claude_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+        if let Some(parent) = settings_file.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
         let empty_content = "{}";
         fs::write(&settings_file, empty_content).map_err(|e| format!("Failed to write file: {}", e))?;
         return Ok(empty_content.to_string());
@@ -246,14 +298,25 @@ async fn get_config_file_content() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn save_config_file_content(content: String) -> Result<bool, String> {
+async fn save_config_file_content(app: tauri::AppHandle, content: String) -> Result<bool, String> {
     
-    // Get home directory
-    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
-    let claude_dir = home_dir.join(".claude");
-    let settings_file = claude_dir.join("settings.json");
+    // Get the configured config path or use default
+    let config_path = get_config_path(app.clone()).await?;
     
-    fs::create_dir_all(&claude_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    // Expand the ~ to home directory if needed
+    let expanded_path = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    let settings_file = expanded_path;
+    
+    // Create directory if it doesn't exist
+    if let Some(parent) = settings_file.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
     
     // 验证JSON格式
     serde_json::from_str::<serde_json::Value>(&content).map_err(|e| format!("无效的JSON格式: {}", e))?;
@@ -357,15 +420,21 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn backup_config_file(backup_filename: String) -> Result<bool, String> {
+async fn backup_config_file(app: tauri::AppHandle, backup_filename: String) -> Result<bool, String> {
     use std::fs;
     
     println!("Backup function called with filename: {}", backup_filename);
     
-    // Get home directory
-    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
-    let claude_dir = home_dir.join(".claude");
-    let settings_file = claude_dir.join("settings.json");
+    // Get the configured config path
+    let config_path = get_config_path(app.clone()).await?;
+    
+    // Expand the ~ to home directory if needed
+    let settings_file = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
     
     println!("Settings file path: {:?}", settings_file);
     
@@ -377,17 +446,18 @@ async fn backup_config_file(backup_filename: String) -> Result<bool, String> {
     let content = fs::read_to_string(&settings_file)
         .map_err(|e| format!("Failed to read file: {}", e))?;
     
-    // Create backup directory if it doesn't exist
-    let backup_dir = claude_dir.join("back");
-    fs::create_dir_all(&backup_dir).map_err(|e| format!("Failed to create backup directory: {}", e))?;
+    // Get database connection
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
     
-    // Create backup file path
-    let backup_file = backup_dir.join(backup_filename);
-    println!("Backup file path: {:?}", backup_file);
+    // Get current timestamp
+    let now = chrono::Utc::now().to_rfc3339();
+    let size = content.len() as i64;
     
-    // Write backup file
-    fs::write(&backup_file, content)
-        .map_err(|e| format!("Failed to write backup file: {}", e))?;
+    // Save backup to database
+    conn.execute(
+        "INSERT INTO backups (filename, content, size, created_at) VALUES (?1, ?2, ?3, ?4)",
+        (&backup_filename, &content, &size, &now),
+    ).map_err(|e| format!("Failed to save backup to database: {}", e))?;
     
     println!("Backup completed successfully");
     Ok(true)
@@ -402,86 +472,68 @@ pub struct BackupFile {
 }
 
 #[tauri::command]
-async fn get_backup_files() -> Result<Vec<BackupFile>, String> {
-    use std::fs;
+async fn get_backup_files(app: tauri::AppHandle) -> Result<Vec<BackupFile>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
     
-    // Get home directory
-    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
-    let claude_dir = home_dir.join(".claude");
-    let backup_dir = claude_dir.join("back");
+    let mut stmt = conn.prepare("SELECT filename, size, created_at FROM backups ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
     
-    if !backup_dir.exists() {
-        return Ok(Vec::new());
+    let backup_files = stmt.query_map([], |row| {
+        Ok(BackupFile {
+            filename: row.get(0)?,
+            path: format!("database://{}", row.get::<_, String>(0)?), // Virtual path for database storage
+            size: row.get(1)?,
+            created_at: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut result = Vec::new();
+    for backup_file in backup_files {
+        result.push(backup_file.map_err(|e| e.to_string())?);
     }
     
-    let mut backup_files = Vec::new();
-    
-    for entry in fs::read_dir(&backup_dir).map_err(|e| format!("Failed to read backup directory: {}", e))? {
-        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-        let path = entry.path();
-        
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-            let metadata = fs::metadata(&path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
-            let filename = path.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            
-            let created_at = metadata.created()
-                .map(|time| {
-                    use std::time::SystemTime;
-                    let duration_since_epoch = time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-                    chrono::DateTime::from_timestamp(duration_since_epoch.as_secs() as i64, 0)
-                        .map(|dt| dt.to_rfc3339())
-                        .unwrap_or("unknown".to_string())
-                })
-                .unwrap_or("unknown".to_string());
-            
-            backup_files.push(BackupFile {
-                filename: filename.clone(),
-                path: path.to_string_lossy().to_string(),
-                size: metadata.len(),
-                created_at,
-            });
-        }
-    }
-    
-    // Sort by creation time (newest first)
-    backup_files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    
-    Ok(backup_files)
+    Ok(result)
 }
 
 #[tauri::command]
-async fn restore_config_file(backup_filename: String) -> Result<bool, String> {
+async fn restore_config_file(app: tauri::AppHandle, backup_filename: String) -> Result<bool, String> {
     use std::fs;
     
     println!("Restore function called with filename: {}", backup_filename);
     
-    // Get home directory
-    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
-    let claude_dir = home_dir.join(".claude");
-    let backup_dir = claude_dir.join("back");
-    let backup_file = backup_dir.join(backup_filename);
-    let settings_file = claude_dir.join("settings.json");
+    // Get the configured config path
+    let config_path = get_config_path(app.clone()).await?;
     
-    println!("Backup file path: {:?}", backup_file);
+    // Expand the ~ to home directory if needed
+    let settings_file = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    // Get database connection
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    // Get backup content from database
+    let content: Option<String> = conn.query_row(
+        "SELECT content FROM backups WHERE filename = ?1 ORDER BY created_at DESC LIMIT 1",
+        [&backup_filename],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    
+    let content = content.ok_or("备份文件不存在".to_string())?;
+    
     println!("Settings file path: {:?}", settings_file);
-    
-    if !backup_file.exists() {
-        return Err("备份文件不存在".to_string());
-    }
-    
-    // Read backup file content
-    let content = fs::read_to_string(&backup_file)
-        .map_err(|e| format!("Failed to read backup file: {}", e))?;
     
     // Validate JSON format
     serde_json::from_str::<serde_json::Value>(&content)
         .map_err(|e| format!("备份文件格式无效: {}", e))?;
     
     // Create directory if it doesn't exist
-    fs::create_dir_all(&claude_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    if let Some(parent) = settings_file.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
     
     // Write to settings file
     fs::write(&settings_file, content)
@@ -648,6 +700,134 @@ async fn get_config_path(app: tauri::AppHandle) -> Result<String, String> {
     Ok(result)
 }
 
+#[tauri::command]
+async fn migrate_api_keys(app: tauri::AppHandle) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    // Check if anthropic_base_url column exists using a simple query
+    let mut has_anthropic_base_url = false;
+    let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='api_keys'")
+        .map_err(|e| e.to_string())?;
+    
+    let table_sql: Option<String> = stmt.query_row([], |row| row.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    
+    if let Some(sql) = table_sql {
+        has_anthropic_base_url = sql.contains("anthropic_base_url");
+    }
+
+    if !has_anthropic_base_url {
+        println!("Adding anthropic_base_url column to api_keys table");
+        conn.execute(
+            "ALTER TABLE api_keys ADD COLUMN anthropic_base_url TEXT",
+            (),
+        ).map_err(|e| e.to_string())?;
+        
+        // Update existing records to have default anthropic_base_url
+        let affected_rows = conn.execute(
+            "UPDATE api_keys SET anthropic_base_url = 'https://api.anthropic.com' WHERE anthropic_base_url IS NULL",
+            (),
+        ).map_err(|e| e.to_string())?;
+        
+        println!("Migration completed: Added anthropic_base_url column and updated {} records", affected_rows);
+        Ok(true)
+    } else {
+        println!("anthropic_base_url column already exists, no migration needed");
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+async fn update_config_env(config_path: String, api_key: String, base_url: Option<String>) -> Result<bool, String> {
+    // Expand the ~ to home directory if needed
+    let expanded_path = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    let settings_file = expanded_path;
+    
+    println!("Updating config env with API key: {}", api_key);
+    println!("Base URL: {:?}", base_url);
+    println!("Settings file path: {:?}", settings_file);
+    
+    // Read existing config or create default with the correct format
+    let mut config: ConfigFileFormat = if settings_file.exists() {
+        let content = fs::read_to_string(&settings_file)
+            .map_err(|e| format!("Failed to read settings file: {}", e))?;
+        
+        // Try to parse as the new format first
+        if let Ok(new_format) = serde_json::from_str::<ConfigFileFormat>(&content) {
+            new_format
+        } else {
+            // If it fails, try to parse as the old format and convert
+            let old_settings: ClaudeSettings = serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse settings file: {}", e))?;
+            
+            // Convert old format to new format
+            let auth_token = old_settings.anthropic_auth_token.clone();
+            ConfigFileFormat {
+                env: EnvConfig {
+                    ANTHROPIC_AUTH_TOKEN: auth_token.clone(),
+                    ANTHROPIC_BASE_URL: old_settings.anthropic_base_url,
+                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Some(1),
+                },
+                permissions: PermissionsConfig {
+                    allow: Some(vec![]),
+                    deny: Some(vec![]),
+                },
+                apiKeyHelper: auth_token
+                    .map(|token| format!("echo '{}'", token)),
+            }
+        }
+    } else {
+        // Create directory if it doesn't exist
+        if let Some(parent) = settings_file.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        
+        // Create default settings with the correct format
+        ConfigFileFormat {
+            env: EnvConfig {
+                ANTHROPIC_AUTH_TOKEN: None,
+                ANTHROPIC_BASE_URL: Some("https://api.anthropic.com".to_string()),
+                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Some(1),
+            },
+            permissions: PermissionsConfig {
+                allow: Some(vec![]),
+                deny: Some(vec![]),
+            },
+            apiKeyHelper: None,
+        }
+    };
+    
+    // Update only the ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL fields
+    if api_key.is_empty() {
+        config.env.ANTHROPIC_AUTH_TOKEN = None;
+        config.apiKeyHelper = None;
+    } else {
+        config.env.ANTHROPIC_AUTH_TOKEN = Some(api_key.clone());
+        config.apiKeyHelper = Some(format!("echo '{}'", api_key));
+    }
+    
+    if let Some(url) = base_url {
+        config.env.ANTHROPIC_BASE_URL = Some(url);
+    }
+    
+    // Write back to file
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    
+    fs::write(&settings_file, content)
+        .map_err(|e| format!("Failed to write settings file: {}", e))?;
+    
+    println!("Config env updated successfully");
+    Ok(true)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -672,7 +852,9 @@ pub fn run() {
             update_config_path,
             delete_config_path,
             save_config_path,
-            get_config_path
+            get_config_path,
+            update_config_env,
+            migrate_api_keys
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

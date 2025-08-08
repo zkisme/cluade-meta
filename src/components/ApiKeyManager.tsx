@@ -14,6 +14,7 @@ interface ApiKey {
   name: string;
   key: string;
   description?: string;
+  anthropic_base_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +48,41 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   const [backupFiles, setBackupFiles] = useState<BackupFile[]>([]);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
   
+  // Load active key ID from localStorage on mount
+  useEffect(() => {
+    const savedActiveKeyId = localStorage.getItem('activeApiKey');
+    if (savedActiveKeyId) {
+      setActiveKeyId(savedActiveKeyId);
+    }
+  }, []);
+  
+  // Save active key ID to localStorage when it changes
+  useEffect(() => {
+    if (activeKeyId) {
+      localStorage.setItem('activeApiKey', activeKeyId);
+    } else {
+      localStorage.removeItem('activeApiKey');
+    }
+  }, [activeKeyId]);
+  
+  // Sync active key with API keys list
+  useEffect(() => {
+    if (activeKeyId && apiKeys.length > 0) {
+      const activeKeyExists = apiKeys.some(key => key.id === activeKeyId);
+      if (!activeKeyExists) {
+        setActiveKeyId(null);
+        localStorage.removeItem('activeApiKey');
+      }
+    }
+  }, [apiKeys, activeKeyId]);
+  
+  // Sync active key with config when apiKeys change
+  useEffect(() => {
+    if (apiKeys.length > 0) {
+      syncActiveKeyWithConfig();
+    }
+  }, [apiKeys]);
+  
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     onOpenCreateDialog: () => {
@@ -68,8 +104,51 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
       setApiKeys(keys);
     } catch (error) {
       console.error("Failed to load API keys:", error);
+      // If there's an error, try to migrate the database
+      try {
+        console.log("Attempting to migrate database...");
+        const migrationResult = await invoke<boolean>("migrate_api_keys");
+        if (migrationResult) {
+          toast.success("数据库迁移完成，正在重新加载数据...");
+          // Retry loading API keys after migration
+          setTimeout(async () => {
+            try {
+              const keys = await invoke<ApiKey[]>("get_api_keys");
+              setApiKeys(keys);
+            } catch (retryError) {
+              console.error("Failed to load API keys after migration:", retryError);
+            }
+          }, 1000);
+        }
+      } catch (migrationError) {
+        console.error("Migration failed:", migrationError);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const syncActiveKeyWithConfig = async () => {
+    try {
+      const configContent = await invoke<string>("get_config_file_content");
+      const config = JSON.parse(configContent);
+      
+      // Check if the current config has an API key set (using ANTHROPIC_AUTH_TOKEN)
+      if (config.env?.ANTHROPIC_AUTH_TOKEN) {
+        const currentApiKey = config.env.ANTHROPIC_AUTH_TOKEN;
+        
+        // Find the matching API key in our list
+        const matchingKey = apiKeys.find(key => key.key === currentApiKey);
+        if (matchingKey) {
+          setActiveKeyId(matchingKey.id);
+          return;
+        }
+      }
+      
+      // If no matching key found or no API key in config, clear active state
+      setActiveKeyId(null);
+    } catch (error) {
+      console.error("Failed to sync active key with config:", error);
     }
   };
 
@@ -115,8 +194,9 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
       if (result) {
         toast.success(`配置文件已从备份 ${filename} 恢复成功`);
         setIsRestoreDialogOpen(false);
-        // 刷新API密钥列表
-        loadApiKeys();
+        // 刷新API密钥列表并同步选中状态
+        await loadApiKeys();
+        await syncActiveKeyWithConfig();
       }
     } catch (error) {
       console.error("Failed to restore config file:", error);
@@ -139,13 +219,23 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   };
 
   const handleViewConfig = () => {
-    loadConfigContent();
     setIsConfigViewDialogOpen(true);
   };
 
   useEffect(() => {
-    loadApiKeys();
+    const initializeData = async () => {
+      await loadApiKeys();
+      await syncActiveKeyWithConfig();
+    };
+    initializeData();
   }, []);
+
+  // 当查看配置弹窗打开时，加载最新的配置内容
+  useEffect(() => {
+    if (isConfigViewDialogOpen) {
+      loadConfigContent();
+    }
+  }, [isConfigViewDialogOpen]);
 
   
   const handleDelete = async (id: string) => {
@@ -179,11 +269,37 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     }));
   };
 
-  const handleSwitchToggle = (id: string) => {
-    if (activeKeyId === id) {
-      setActiveKeyId(null);
-    } else {
-      setActiveKeyId(id);
+  const handleSwitchToggle = async (id: string) => {
+    const selectedKey = apiKeys.find(key => key.id === id);
+    
+    try {
+      // Get the configured config file path
+      const configPath = await invoke<string>("get_config_path");
+      
+      if (activeKeyId === id) {
+        // Turning off the switch - set to null
+        setActiveKeyId(null);
+        await invoke<boolean>("update_config_env", { 
+          configPath, 
+          apiKey: "", 
+          baseUrl: null 
+        });
+        toast.success("已关闭API密钥开关");
+      } else {
+        // Turning on the switch - set the new active key
+        setActiveKeyId(id);
+        if (selectedKey) {
+          await invoke<boolean>("update_config_env", { 
+            configPath, 
+            apiKey: selectedKey.key, 
+            baseUrl: selectedKey.anthropic_base_url || null 
+          });
+          toast.success(`已启用API密钥: ${selectedKey.name}`);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to update config env:", error);
+      toast.error("更新配置失败，请重试");
     }
   };
 
@@ -221,11 +337,6 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
 
   return (
     <>
-      <div className="space-y-6">
-        {/* 添加按钮已移至标题栏 */}
-        
-              </div>
-
       <div className="space-y-4">
         {apiKeys.length === 0 ? (
           <div className="text-center py-8 border border-dashed border-border rounded-lg">
@@ -422,9 +533,10 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
       <ConfigEditor 
         open={isConfigEditorOpen}
         onOpenChange={setIsConfigEditorOpen}
-        onConfigSaved={() => {
-          // 当配置保存后刷新API密钥列表
-          loadApiKeys();
+        onConfigSaved={async () => {
+          // 当配置保存后刷新API密钥列表并同步选中状态
+          await loadApiKeys();
+          await syncActiveKeyWithConfig();
         }} 
       />
     </>
