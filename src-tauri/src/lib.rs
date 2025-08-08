@@ -544,6 +544,18 @@ async fn restore_config_file(app: tauri::AppHandle, backup_filename: String) -> 
 }
 
 #[tauri::command]
+async fn delete_backup_file(app: tauri::AppHandle, backup_filename: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    let affected_rows = conn.execute(
+        "DELETE FROM backups WHERE filename = ?1",
+        [&backup_filename],
+    ).map_err(|e| e.to_string())?;
+    
+    Ok(affected_rows > 0)
+}
+
+#[tauri::command]
 async fn create_config_path(
     app: tauri::AppHandle,
     request: CreateConfigPathRequest,
@@ -847,6 +859,7 @@ pub fn run() {
             backup_config_file,
             get_backup_files,
             restore_config_file,
+            delete_backup_file,
             create_config_path,
             get_config_paths,
             update_config_path,

@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Edit, Trash2, Key, Copy, Eye, EyeOff, Upload, Clock } from "lucide-react";
 import { ConfigEditor } from "@/components/ConfigEditor";
 import { KeyFormDialog } from "@/components/KeyFormDialog";
+import { ConfigPathManager } from "@/components/ConfigPathManager";
 
 interface ApiKey {
   id: string;
@@ -31,6 +32,7 @@ interface ApiKeyManagerProps {
   onOpenCreateDialog?: () => void;
   onViewConfig?: () => void;
   onBackup?: () => void;
+  onRestore?: () => void;
   onOpenAdvancedEdit?: () => void;
 }
 
@@ -47,6 +49,8 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   const [isConfigEditorOpen, setIsConfigEditorOpen] = useState(false);
   const [backupFiles, setBackupFiles] = useState<BackupFile[]>([]);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
+  const [configPath, setConfigPath] = useState<string>("");
+  const [showConfigPathManager, setShowConfigPathManager] = useState(false);
   
   // Load active key ID from localStorage on mount
   useEffect(() => {
@@ -204,6 +208,25 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     }
   };
 
+  const deleteBackupFile = async (filename: string) => {
+    if (!confirm(`确定要删除备份文件 ${filename} 吗？此操作无法撤销。`)) return;
+
+    try {
+      const result = await invoke<boolean>("delete_backup_file", { backupFilename: filename });
+      if (result) {
+        toast.success(`备份文件 ${filename} 已成功删除`);
+        // 刷新备份文件列表
+        const files = await invoke<BackupFile[]>("get_backup_files");
+        setBackupFiles(files);
+      } else {
+        toast.error("未找到要删除的备份文件");
+      }
+    } catch (error) {
+      console.error("Failed to delete backup file:", error);
+      toast.error(`删除失败，请重试\n错误: ${(error as any)?.message || error}`);
+    }
+  };
+
   const loadConfigContent = async () => {
     setConfigLoading(true);
     try {
@@ -218,6 +241,16 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     }
   };
 
+  const loadConfigPath = async () => {
+    try {
+      const path = await invoke<string>("get_config_path");
+      setConfigPath(path);
+    } catch (error) {
+      console.error("Failed to load config path:", error);
+      setConfigPath("~/.claude/settings.json");
+    }
+  };
+
   const handleViewConfig = () => {
     setIsConfigViewDialogOpen(true);
   };
@@ -226,6 +259,7 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
     const initializeData = async () => {
       await loadApiKeys();
       await syncActiveKeyWithConfig();
+      await loadConfigPath();
     };
     initializeData();
   }, []);
@@ -305,6 +339,7 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
+    toast.success('API密钥已复制到剪贴板');
   };
 
   const formatDate = (dateString: string) => {
@@ -338,6 +373,41 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
   return (
     <>
       <div className="space-y-4">
+        {/* Config path display */}
+        {configPath && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-md">
+            <div className="flex-1 min-w-0">
+              配置文件路径: <span className="font-mono truncate">{configPath}</span>
+            </div>
+            <div className="flex space-x-2 ml-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowConfigPathManager(true)}
+                className="h-6 px-2 text-xs"
+              >
+                修改路径
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleViewConfig}
+                className="h-6 px-2 text-xs"
+              >
+                查看
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsConfigEditorOpen(true)}
+                className="h-6 px-2 text-xs"
+              >
+                编辑文件
+              </Button>
+            </div>
+          </div>
+        )}
+        
         {apiKeys.length === 0 ? (
           <div className="text-center py-8 border border-dashed border-border rounded-lg">
             <Key className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -514,6 +584,14 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
                           <Upload className="h-3 w-3 mr-1" />
                           恢复
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteBackupFile(file.filename)}
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
                     </div>
                   </Card>
@@ -538,6 +616,18 @@ export const ApiKeyManager = forwardRef<any, ApiKeyManagerProps>((_, ref) => {
           await loadApiKeys();
           await syncActiveKeyWithConfig();
         }} 
+      />
+
+      {/* 配置路径管理器组件 */}
+      <ConfigPathManager 
+        open={showConfigPathManager}
+        onOpenChange={(open) => {
+          setShowConfigPathManager(open);
+          if (!open) {
+            // 当对话框关闭时，重新加载配置路径
+            loadConfigPath();
+          }
+        }}
       />
     </>
   );
