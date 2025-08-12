@@ -4,22 +4,99 @@ use std::fs;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use rusqlite::{Connection, Result, OptionalExtension};
+use serde_json;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiKey {
     pub id: String,
     pub name: String,
-    pub key: String,
+    pub anthropic_auth_token: String,
     pub description: Option<String>,
     pub anthropic_base_url: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EnvironmentVariable {
+    pub id: String,
+    pub name: String,
+    pub key: String,
+    pub value: String,
+    pub scope: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateEnvironmentVariableRequest {
+    pub name: String,
+    pub key: String,
+    pub value: String,
+    pub scope: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateEnvironmentVariableRequest {
+    pub name: Option<String>,
+    pub key: Option<String>,
+    pub value: Option<String>,
+    pub scope: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RouteConfig {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub method: String,
+    pub handler: String,
+    pub middleware: Option<Vec<String>>,
+    pub auth_required: bool,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl RouteConfig {
+    fn to_db_middleware(&self) -> Option<String> {
+        self.middleware.as_ref().map(|m| serde_json::to_string(m).unwrap_or_else(|_| "[]".to_string()))
+    }
+    
+    fn from_db_middleware(middleware_json: Option<String>) -> Option<Vec<String>> {
+        middleware_json.and_then(|json| serde_json::from_str(&json).ok())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRouteConfigRequest {
+    pub name: String,
+    pub path: String,
+    pub method: String,
+    pub handler: String,
+    pub middleware: Option<Vec<String>>,
+    pub auth_required: bool,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRouteConfigRequest {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub method: Option<String>,
+    pub handler: Option<String>,
+    pub middleware: Option<Vec<String>>,
+    pub auth_required: Option<bool>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    pub key: String,
+    pub anthropic_auth_token: String,
     pub description: Option<String>,
     pub anthropic_base_url: Option<String>,
 }
@@ -27,7 +104,7 @@ pub struct CreateApiKeyRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
-    pub key: Option<String>,
+    pub anthropic_auth_token: Option<String>,
     pub description: Option<String>,
     pub anthropic_base_url: Option<String>,
 }
@@ -49,9 +126,9 @@ pub struct ClaudeSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
-    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
-    pub ANTHROPIC_BASE_URL: Option<String>,
-    pub CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Option<u32>,
+    pub anthropic_auth_token: Option<String>,
+    pub anthropic_base_url: Option<String>,
+    pub claude_code_disable_nonessential_traffic: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -64,7 +141,7 @@ pub struct PermissionsConfig {
 pub struct ConfigFileFormat {
     pub env: EnvConfig,
     pub permissions: PermissionsConfig,
-    pub apiKeyHelper: Option<String>,
+    pub api_key_helper: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -103,7 +180,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS api_keys (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            key TEXT NOT NULL,
+            anthropic_auth_token TEXT NOT NULL,
             description TEXT,
             anthropic_base_url TEXT,
             created_at TEXT NOT NULL,
@@ -111,6 +188,21 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         )",
         (),
     )?;
+
+    // Check if we need to migrate from old schema (key column to anthropic_auth_token)
+    let has_key_column: Result<bool> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'key'",
+        [],
+        |row| row.get(0),
+    );
+
+    if let Ok(true) = has_key_column {
+        // Migration needed: rename key column to anthropic_auth_token
+        conn.execute(
+            "ALTER TABLE api_keys RENAME COLUMN key TO anthropic_auth_token",
+            (),
+        ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
+    }
 
     // Create the config_paths table if it doesn't exist
     conn.execute(
@@ -146,6 +238,38 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         )",
         (),
     )?;
+
+    // Create the environment_variables table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS environment_variables (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+
+    // Create the route_configs table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS route_configs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            method TEXT NOT NULL,
+            handler TEXT NOT NULL,
+            middleware TEXT,
+            auth_required INTEGER NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
     
     Ok(conn)
 }
@@ -166,7 +290,7 @@ async fn create_api_key(
     let api_key = ApiKey {
         id: uuid::Uuid::new_v4().to_string(),
         name: request.name,
-        key: request.key,
+        anthropic_auth_token: request.anthropic_auth_token,
         description: request.description,
         anthropic_base_url: request.anthropic_base_url,
         created_at: now.clone(),
@@ -174,8 +298,8 @@ async fn create_api_key(
     };
 
     conn.execute(
-        "INSERT INTO api_keys (id, name, key, description, anthropic_base_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        (&api_key.id, &api_key.name, &api_key.key, &api_key.description, &api_key.anthropic_base_url, &api_key.created_at, &api_key.updated_at),
+        "INSERT INTO api_keys (id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        (&api_key.id, &api_key.name, &api_key.anthropic_auth_token, &api_key.description, &api_key.anthropic_base_url, &api_key.created_at, &api_key.updated_at),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -185,18 +309,71 @@ async fn create_api_key(
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, key, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
         Ok(ApiKey {
             id: row.get(0)?,
             name: row.get(1)?,
-            key: row.get(2)?,
+            anthropic_auth_token: row.get(2)?,
             description: row.get(3)?,
             anthropic_base_url: row.get(4)?,
             created_at: row.get(5)?,
             updated_at: row.get(6)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for api_key in api_keys {
+        result.push(api_key.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigItem<T> {
+    pub id: String,
+    pub name: String,
+    pub data: T,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApiKeyData {
+    pub anthropic_auth_token: String,
+    pub anthropic_base_url: Option<String>,
+}
+
+#[tauri::command]
+async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<ApiKeyData>>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let api_keys = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let anthropic_auth_token: String = row.get(2)?;
+        let description: Option<String> = row.get(3)?;
+        let anthropic_base_url: Option<String> = row.get(4)?;
+        let created_at: String = row.get(5)?;
+        let updated_at: String = row.get(6)?;
+        
+        Ok(ConfigItem {
+            id,
+            name,
+            data: ApiKeyData {
+                anthropic_auth_token,
+                anthropic_base_url,
+            },
+            description,
+            created_at,
+            updated_at,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -218,13 +395,13 @@ async fn update_api_key(
 
     // Check if the API key exists
     let existing_key: Option<ApiKey> = conn.query_row(
-        "SELECT id, name, key, description, anthropic_base_url, created_at, updated_at FROM api_keys WHERE id = ?1",
+        "SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys WHERE id = ?1",
         [&id],
         |row| {
             Ok(ApiKey {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                key: row.get(2)?,
+                anthropic_auth_token: row.get(2)?,
                 description: row.get(3)?,
                 anthropic_base_url: row.get(4)?,
                 created_at: row.get(5)?,
@@ -238,8 +415,8 @@ async fn update_api_key(
     if let Some(name) = request.name {
         api_key.name = name;
     }
-    if let Some(key) = request.key {
-        api_key.key = key;
+    if let Some(anthropic_auth_token) = request.anthropic_auth_token {
+        api_key.anthropic_auth_token = anthropic_auth_token;
     }
     if let Some(description) = request.description {
         api_key.description = Some(description);
@@ -250,8 +427,8 @@ async fn update_api_key(
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE api_keys SET name = ?1, key = ?2, description = ?3, anthropic_base_url = ?4, updated_at = ?5 WHERE id = ?6",
-        (&api_key.name, &api_key.key, &api_key.description, &api_key.anthropic_base_url, &api_key.updated_at, &id),
+        "UPDATE api_keys SET name = ?1, anthropic_auth_token = ?2, description = ?3, anthropic_base_url = ?4, updated_at = ?5 WHERE id = ?6",
+        (&api_key.name, &api_key.anthropic_auth_token, &api_key.description, &api_key.anthropic_base_url, &api_key.updated_at, &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -295,6 +472,47 @@ async fn get_config_file_content(app: tauri::AppHandle) -> Result<String, String
     }
 
     fs::read_to_string(&settings_file).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+#[tauri::command]
+async fn read_config_file(config_path: String) -> Result<String, String> {
+    // Expand the ~ to home directory if needed
+    let expanded_path = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    let settings_file = expanded_path;
+
+    if !settings_file.exists() {
+        return Ok("".to_string());
+    }
+
+    fs::read_to_string(&settings_file).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+#[tauri::command]
+async fn write_config_file(config_path: String, content: String) -> Result<bool, String> {
+    // Expand the ~ to home directory if needed
+    let expanded_path = if config_path.starts_with("~/") {
+        let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+        home_dir.join(&config_path[2..])
+    } else {
+        std::path::PathBuf::from(config_path)
+    };
+    
+    let settings_file = expanded_path;
+    
+    // Create directory if it doesn't exist
+    if let Some(parent) = settings_file.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    fs::write(&settings_file, content).map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    Ok(true)
 }
 
 #[tauri::command]
@@ -398,24 +616,40 @@ async fn save_claude_settings(path: String, settings: ClaudeSettings) -> Result<
 
 #[tauri::command]
 async fn open_file_dialog(app: tauri::AppHandle) -> Result<String, String> {
-    use std::sync::mpsc;
+    use tokio::sync::oneshot;
     
-    let (tx, rx) = mpsc::channel();
+    println!("=== open_file_dialog 开始 ===");
     
+    let (tx, rx) = oneshot::channel();
+    
+    println!("创建文件对话框...");
     app.dialog().file()
         .set_title("选择配置文件")
         .add_filter("JSON文件", &["json"])
         .add_filter("所有文件", &["*"])
         .pick_file(move |result| {
+            println!("文件对话框回调结果: {:?}", result);
             let _ = tx.send(result);
         });
     
-    match rx.recv().unwrap() {
-        Some(path) => {
+    println!("等待对话框结果...");
+    match rx.await {
+        Ok(Some(path)) => {
             let path_str = path.to_string();
+            println!("用户选择了文件: {}", path_str);
+            println!("=== open_file_dialog 成功结束 ===");
             Ok(path_str)
         }
-        None => Err("用户取消了选择".to_string()),
+        Ok(None) => {
+            println!("用户取消了选择");
+            println!("=== open_file_dialog 取消结束 ===");
+            Err("用户取消了选择".to_string())
+        }
+        Err(e) => {
+            println!("文件选择失败: {:?}", e);
+            println!("=== open_file_dialog 错误结束 ===");
+            Err("文件选择失败".to_string())
+        }
     }
 }
 
@@ -553,6 +787,21 @@ async fn delete_backup_file(app: tauri::AppHandle, backup_filename: String) -> R
     ).map_err(|e| e.to_string())?;
     
     Ok(affected_rows > 0)
+}
+
+#[tauri::command]
+async fn get_backup_content(app: tauri::AppHandle, backup_filename: String) -> Result<String, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    
+    let content: Option<String> = conn.query_row(
+        "SELECT content FROM backups WHERE filename = ?1 ORDER BY created_at DESC LIMIT 1",
+        [&backup_filename],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    
+    let content = content.ok_or("备份文件不存在".to_string())?;
+    
+    Ok(content)
 }
 
 #[tauri::command]
@@ -709,46 +958,19 @@ async fn get_config_path(app: tauri::AppHandle) -> Result<String, String> {
     println!("Retrieved config path: {:?}", path_clone);
     println!("Returning config path: {}", result);
     
+    // If no records exist, insert the default path
+    if count == 0 {
+        println!("No config path found, inserting default path");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO current_config_path (path, updated_at) VALUES (?1, ?2)",
+            (&result, &now),
+        ).map_err(|e| format!("Failed to insert default config path: {}", e))?;
+    }
+    
     Ok(result)
 }
 
-#[tauri::command]
-async fn migrate_api_keys(app: tauri::AppHandle) -> Result<bool, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
-    
-    // Check if anthropic_base_url column exists using a simple query
-    let mut has_anthropic_base_url = false;
-    let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='api_keys'")
-        .map_err(|e| e.to_string())?;
-    
-    let table_sql: Option<String> = stmt.query_row([], |row| row.get(0))
-        .optional()
-        .map_err(|e| e.to_string())?;
-    
-    if let Some(sql) = table_sql {
-        has_anthropic_base_url = sql.contains("anthropic_base_url");
-    }
-
-    if !has_anthropic_base_url {
-        println!("Adding anthropic_base_url column to api_keys table");
-        conn.execute(
-            "ALTER TABLE api_keys ADD COLUMN anthropic_base_url TEXT",
-            (),
-        ).map_err(|e| e.to_string())?;
-        
-        // Update existing records to have default anthropic_base_url
-        let affected_rows = conn.execute(
-            "UPDATE api_keys SET anthropic_base_url = 'https://api.anthropic.com' WHERE anthropic_base_url IS NULL",
-            (),
-        ).map_err(|e| e.to_string())?;
-        
-        println!("Migration completed: Added anthropic_base_url column and updated {} records", affected_rows);
-        Ok(true)
-    } else {
-        println!("anthropic_base_url column already exists, no migration needed");
-        Ok(false)
-    }
-}
 
 #[tauri::command]
 async fn update_config_env(config_path: String, api_key: String, base_url: Option<String>) -> Result<bool, String> {
@@ -783,15 +1005,15 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
             let auth_token = old_settings.anthropic_auth_token.clone();
             ConfigFileFormat {
                 env: EnvConfig {
-                    ANTHROPIC_AUTH_TOKEN: auth_token.clone(),
-                    ANTHROPIC_BASE_URL: old_settings.anthropic_base_url,
-                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Some(1),
+                    anthropic_auth_token: auth_token.clone(),
+                    anthropic_base_url: old_settings.anthropic_base_url,
+                    claude_code_disable_nonessential_traffic: Some(1),
                 },
                 permissions: PermissionsConfig {
                     allow: Some(vec![]),
                     deny: Some(vec![]),
                 },
-                apiKeyHelper: auth_token
+                api_key_helper: auth_token
                     .map(|token| format!("echo '{}'", token)),
             }
         }
@@ -804,29 +1026,29 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
         // Create default settings with the correct format
         ConfigFileFormat {
             env: EnvConfig {
-                ANTHROPIC_AUTH_TOKEN: None,
-                ANTHROPIC_BASE_URL: Some("https://api.anthropic.com".to_string()),
-                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: Some(1),
+                anthropic_auth_token: None,
+                anthropic_base_url: Some("https://api.anthropic.com".to_string()),
+                claude_code_disable_nonessential_traffic: Some(1),
             },
             permissions: PermissionsConfig {
                 allow: Some(vec![]),
                 deny: Some(vec![]),
             },
-            apiKeyHelper: None,
+            api_key_helper: None,
         }
     };
     
-    // Update only the ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL fields
+    // Update only the anthropic_auth_token and anthropic_base_url fields
     if api_key.is_empty() {
-        config.env.ANTHROPIC_AUTH_TOKEN = None;
-        config.apiKeyHelper = None;
+        config.env.anthropic_auth_token = None;
+        config.api_key_helper = None;
     } else {
-        config.env.ANTHROPIC_AUTH_TOKEN = Some(api_key.clone());
-        config.apiKeyHelper = Some(format!("echo '{}'", api_key));
+        config.env.anthropic_auth_token = Some(api_key.clone());
+        config.api_key_helper = Some(format!("echo '{}'", api_key));
     }
     
     if let Some(url) = base_url {
-        config.env.ANTHROPIC_BASE_URL = Some(url);
+        config.env.anthropic_base_url = Some(url);
     }
     
     // Write back to file
@@ -840,19 +1062,387 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
     Ok(true)
 }
 
+// Environment Variables CRUD operations
+#[tauri::command]
+async fn create_environment_variable(
+    app: tauri::AppHandle,
+    request: CreateEnvironmentVariableRequest,
+) -> Result<EnvironmentVariable, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let env_var = EnvironmentVariable {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: request.name,
+        key: request.key,
+        value: request.value,
+        scope: request.scope,
+        description: request.description,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    conn.execute(
+        "INSERT INTO environment_variables (id, name, key, value, scope, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        (&env_var.id, &env_var.name, &env_var.key, &env_var.value, &env_var.scope, &env_var.description, &env_var.created_at, &env_var.updated_at),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(env_var)
+}
+
+#[tauri::command]
+async fn get_environment_variables(app: tauri::AppHandle) -> Result<Vec<EnvironmentVariable>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let env_vars = stmt.query_map([], |row| {
+        Ok(EnvironmentVariable {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            key: row.get(2)?,
+            value: row.get(3)?,
+            scope: row.get(4)?,
+            description: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for env_var in env_vars {
+        result.push(env_var.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnvironmentVariableData {
+    pub key: String,
+    pub value: String,
+    pub scope: String,
+}
+
+#[tauri::command]
+async fn get_environment_variables_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<EnvironmentVariableData>>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let env_vars = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let key: String = row.get(2)?;
+        let value: String = row.get(3)?;
+        let scope: String = row.get(4)?;
+        let description: Option<String> = row.get(5)?;
+        let created_at: String = row.get(6)?;
+        let updated_at: String = row.get(7)?;
+        
+        Ok(ConfigItem {
+            id,
+            name,
+            data: EnvironmentVariableData {
+                key,
+                value,
+                scope,
+            },
+            description,
+            created_at,
+            updated_at,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for env_var in env_vars {
+        result.push(env_var.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn update_environment_variable(
+    app: tauri::AppHandle,
+    id: String,
+    request: UpdateEnvironmentVariableRequest,
+) -> Result<EnvironmentVariable, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let existing_var: Option<EnvironmentVariable> = conn.query_row(
+        "SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables WHERE id = ?1",
+        [&id],
+        |row| {
+            Ok(EnvironmentVariable {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                key: row.get(2)?,
+                value: row.get(3)?,
+                scope: row.get(4)?,
+                description: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        },
+    ).optional().map_err(|e| e.to_string())?;
+
+    let mut env_var = existing_var.ok_or("Environment variable not found")?;
+
+    if let Some(name) = request.name {
+        env_var.name = name;
+    }
+    if let Some(key) = request.key {
+        env_var.key = key;
+    }
+    if let Some(value) = request.value {
+        env_var.value = value;
+    }
+    if let Some(scope) = request.scope {
+        env_var.scope = scope;
+    }
+    if let Some(description) = request.description {
+        env_var.description = Some(description);
+    }
+    env_var.updated_at = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE environment_variables SET name = ?1, key = ?2, value = ?3, scope = ?4, description = ?5, updated_at = ?6 WHERE id = ?7",
+        (&env_var.name, &env_var.key, &env_var.value, &env_var.scope, &env_var.description, &env_var.updated_at, &id),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(env_var)
+}
+
+#[tauri::command]
+async fn delete_environment_variable(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let affected_rows = conn.execute(
+        "DELETE FROM environment_variables WHERE id = ?1",
+        [&id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(affected_rows > 0)
+}
+
+// Route Config CRUD operations
+#[tauri::command]
+async fn create_route_config(
+    app: tauri::AppHandle,
+    request: CreateRouteConfigRequest,
+) -> Result<RouteConfig, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let route_config = RouteConfig {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: request.name,
+        path: request.path,
+        method: request.method,
+        handler: request.handler,
+        middleware: request.middleware,
+        auth_required: request.auth_required,
+        description: request.description,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    conn.execute(
+        "INSERT INTO route_configs (id, name, path, method, handler, middleware, auth_required, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        (&route_config.id, &route_config.name, &route_config.path, &route_config.method, &route_config.handler, &route_config.to_db_middleware(), &route_config.auth_required, &route_config.description, &route_config.created_at, &route_config.updated_at),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(route_config)
+}
+
+#[tauri::command]
+async fn get_route_configs(app: tauri::AppHandle) -> Result<Vec<RouteConfig>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, path, method, handler, middleware, auth_required, description, created_at, updated_at FROM route_configs ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let route_configs = stmt.query_map([], |row| {
+        let middleware_json: Option<String> = row.get(5)?;
+        Ok(RouteConfig {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            path: row.get(2)?,
+            method: row.get(3)?,
+            handler: row.get(4)?,
+            middleware: RouteConfig::from_db_middleware(middleware_json),
+            auth_required: row.get(6)?,
+            description: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for route_config in route_configs {
+        result.push(route_config.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RouteConfigData {
+    pub path: String,
+    pub method: String,
+    pub handler: String,
+    pub middleware: Option<Vec<String>>,
+    pub auth_required: bool,
+}
+
+#[tauri::command]
+async fn get_route_configs_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<RouteConfigData>>, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, name, path, method, handler, middleware, auth_required, description, created_at, updated_at FROM route_configs ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    
+    let route_configs = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let path: String = row.get(2)?;
+        let method: String = row.get(3)?;
+        let handler: String = row.get(4)?;
+        let middleware_json: Option<String> = row.get(5)?;
+        let auth_required: bool = row.get(6)?;
+        let description: Option<String> = row.get(7)?;
+        let created_at: String = row.get(8)?;
+        let updated_at: String = row.get(9)?;
+        
+        Ok(ConfigItem {
+            id,
+            name,
+            data: RouteConfigData {
+                path,
+                method,
+                handler,
+                middleware: RouteConfig::from_db_middleware(middleware_json),
+                auth_required,
+            },
+            description,
+            created_at,
+            updated_at,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for route_config in route_configs {
+        result.push(route_config.map_err(|e| e.to_string())?);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn update_route_config(
+    app: tauri::AppHandle,
+    id: String,
+    request: UpdateRouteConfigRequest,
+) -> Result<RouteConfig, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let existing_config: Option<RouteConfig> = conn.query_row(
+        "SELECT id, name, path, method, handler, middleware, auth_required, description, created_at, updated_at FROM route_configs WHERE id = ?1",
+        [&id],
+        |row| {
+            let middleware_json: Option<String> = row.get(5)?;
+            Ok(RouteConfig {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                method: row.get(3)?,
+                handler: row.get(4)?,
+                middleware: RouteConfig::from_db_middleware(middleware_json),
+                auth_required: row.get(6)?,
+                description: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    ).optional().map_err(|e| e.to_string())?;
+
+    let mut route_config = existing_config.ok_or("Route config not found")?;
+
+    if let Some(name) = request.name {
+        route_config.name = name;
+    }
+    if let Some(path) = request.path {
+        route_config.path = path;
+    }
+    if let Some(method) = request.method {
+        route_config.method = method;
+    }
+    if let Some(handler) = request.handler {
+        route_config.handler = handler;
+    }
+    if let Some(middleware) = request.middleware {
+        route_config.middleware = Some(middleware);
+    }
+    if let Some(auth_required) = request.auth_required {
+        route_config.auth_required = auth_required;
+    }
+    if let Some(description) = request.description {
+        route_config.description = Some(description);
+    }
+    route_config.updated_at = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE route_configs SET name = ?1, path = ?2, method = ?3, handler = ?4, middleware = ?5, auth_required = ?6, description = ?7, updated_at = ?8 WHERE id = ?9",
+        (&route_config.name, &route_config.path, &route_config.method, &route_config.handler, &route_config.to_db_middleware(), &route_config.auth_required, &route_config.description, &route_config.updated_at, &id),
+    ).map_err(|e| e.to_string())?;
+
+    Ok(route_config)
+}
+
+#[tauri::command]
+async fn delete_route_config(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let affected_rows = conn.execute(
+        "DELETE FROM route_configs WHERE id = ?1",
+        [&id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(affected_rows > 0)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|_app| {
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             create_api_key,
             get_api_keys,
+            get_api_keys_config,
             update_api_key,
             delete_api_key,
+            create_environment_variable,
+            get_environment_variables,
+            get_environment_variables_config,
+            update_environment_variable,
+            delete_environment_variable,
+            create_route_config,
+            get_route_configs,
+            get_route_configs_config,
+            update_route_config,
+            delete_route_config,
             get_config_file_content,
             save_config_file_content,
+            read_config_file,
+            write_config_file,
             get_claude_settings,
             save_claude_settings,
             open_file_dialog,
@@ -860,14 +1450,14 @@ pub fn run() {
             get_backup_files,
             restore_config_file,
             delete_backup_file,
+            get_backup_content,
             create_config_path,
             get_config_paths,
             update_config_path,
             delete_config_path,
             save_config_path,
             get_config_path,
-            update_config_env,
-            migrate_api_keys
+            update_config_env
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

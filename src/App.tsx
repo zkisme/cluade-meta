@@ -27,27 +27,17 @@ import {
   SidebarProvider,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Settings, Code, Router, Variable, Home, FolderOpen } from "lucide-react";
+import { Settings, Home, FolderOpen } from "lucide-react";
 import { ConfigPathManager } from "@/components/ConfigPathManager";
 
-// Menu items.
-const items = [
-  {
-    title: "Claude Code",
-    key: "claude-code",
-    icon: Code,
-  },
-  {
-    title: "Claude Code Router",
-    key: "claude-router",
-    icon: Router,
-  },
-  {
-    title: "环境变量",
-    key: "environment",
-    icon: Variable,
-  },
-];
+import { configTypes } from "@/config/index";
+
+// Menu items derived from config types
+const items = configTypes.map(configType => ({
+  title: configType.displayName,
+  key: configType.id,
+  icon: configType.icon,
+}));
 
 type ActiveView = "overview" | "claude-code" | "claude-router" | "environment";
 
@@ -117,7 +107,7 @@ function AppContent() {
                       onClick={() => handleMenuClick(item.key)}
                     >
                       <a href="#" className="flex items-center gap-2">
-                        <item.icon />
+                        <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>
                       </a>
                     </SidebarMenuButton>
@@ -158,7 +148,7 @@ function AppContent() {
             </h1>
           </div>
 
-          {activeView === "claude-code" && (
+          {configTypes.some(ct => ct.id === activeView) && (
             <div className="flex items-center gap-1 px-4">
               <Tooltip>
                 <TooltipTrigger>

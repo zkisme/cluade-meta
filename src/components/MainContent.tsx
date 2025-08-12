@@ -1,7 +1,8 @@
-import { useEffect } from "react";
-import { ApiKeyManager } from "@/components/ApiKeyManager";
+import { useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Code, Router, Variable, Home, Settings } from "lucide-react";
+import { Code, Home, Settings } from "lucide-react";
+import { GenericConfigManager } from "@/components/GenericConfigManager";
+import { configTypes } from "@/config/index";
 
 type ActiveView = 'overview' | 'claude-code' | 'claude-router' | 'environment';
 
@@ -11,6 +12,8 @@ interface MainContentProps {
 }
 
 export function MainContent({ activeView, apiKeyManagerRef }: MainContentProps) {
+  const configManagerRefs = useRef<Record<string, React.RefObject<any>>>({});
+  
   const updateTitle = (title: string) => {
     const titleElement = document.getElementById('main-title');
     if (titleElement) {
@@ -34,78 +37,23 @@ export function MainContent({ activeView, apiKeyManagerRef }: MainContentProps) 
     }
   }, [activeView]);
   const renderContent = () => {
-    switch (activeView) {
-      case 'claude-code':
-        return <ApiKeyManager 
-          ref={apiKeyManagerRef}
+    const configType = configTypes.find(ct => ct.id === activeView);
+    
+    if (configType) {
+      return (
+        <GenericConfigManager
+          ref={activeView === 'claude-code' ? apiKeyManagerRef : configManagerRefs.current[activeView]}
+          configType={configType}
           onOpenCreateDialog={() => {}}
           onViewConfig={() => {}}
           onBackup={() => {}}
+          onRestore={() => {}}
           onOpenAdvancedEdit={() => {}}
-        />;
-      
-      case 'claude-router':
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground">
-                  配置Claude Code的路由设置和请求处理
-                </p>
-              </div>
-            </div>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>路由配置</CardTitle>
-                <CardDescription>
-                  管理API请求的路由规则和配置
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <Router className="mx-auto h-12 w-12 text-muted-foreground" />
-                  <h3 className="mt-2 text-sm font-medium">路由配置功能开发中</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    此功能将在后续版本中提供
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        );
-      
-      case 'environment':
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground">
-                  管理应用程序的环境变量和配置文件
-                </p>
-              </div>
-            </div>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>环境变量管理</CardTitle>
-                <CardDescription>
-                  配置和管理系统环境变量
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <Variable className="mx-auto h-12 w-12 text-muted-foreground" />
-                  <h3 className="mt-2 text-sm font-medium">环境变量功能开发中</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    此功能将在后续版本中提供
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        );
-      
+        />
+      );
+    }
+    
+    switch (activeView) {
       default:
         return (
           <div className="space-y-6">

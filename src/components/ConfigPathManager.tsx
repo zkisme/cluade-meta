@@ -1,7 +1,26 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { invoke } from "@tauri-apps/api/core"
+// Helper function to safely invoke Tauri commands
+const invokeTauri = async <T,>(command: string, args?: any): Promise<T> => {
+  console.log(`=== invokeTauri 调试 ===`);
+  console.log(`命令: ${command}`);
+  console.log(`参数:`, args);
+  console.log(`window.__TAURI__ 存在:`, !!(window as any).__TAURI__);
+  console.log(`window.__TAURI__ 值:`, (window as any).__TAURI__);
+  
+  try {
+    console.log(`尝试导入 @tauri-apps/api/core...`);
+    const { invoke } = await import('@tauri-apps/api/core');
+    console.log(`成功导入 invoke 函数，调用命令: ${command}`);
+    const result = invoke<T>(command, args);
+    console.log(`命令调用成功，返回结果:`, result);
+    return result;
+  } catch (importError) {
+    console.error(`导入或调用 Tauri API 失败:`, importError);
+    throw new Error('Tauri environment not available');
+  }
+};
 import { toast } from "sonner"
 import {
   Dialog,
@@ -27,7 +46,7 @@ export function ConfigPathManager({ open, onOpenChange }: ConfigPathManagerProps
     const loadInitialPath = async () => {
       try {
         console.log("Loading initial config path...")
-        const path = await invoke<string>("get_config_path")
+        const path = await invokeTauri<string>("get_config_path")
         console.log("Initial config path loaded:", path)
         setConfigPath(path || "~/.claude/settings.json")
       } catch (error) {
@@ -39,16 +58,32 @@ export function ConfigPathManager({ open, onOpenChange }: ConfigPathManagerProps
   }, [])
 
   const handleOpenFileDialog = async () => {
+    console.log("=== 文件对话框开始 ===")
     try {
-      const path = await invoke<string>("open_file_dialog")
+      console.log("调用 open_file_dialog 命令...")
+      const path = await invokeTauri<string>("open_file_dialog")
+      console.log("open_file_dialog 返回结果:", path)
       if (path) {
+        console.log("设置配置路径:", path)
         setConfigPath(path)
+      } else {
+        console.log("返回的路径为空")
       }
     } catch (error) {
-      if (error !== "用户取消了选择") {
+      console.error("=== 文件对话框错误 ===")
+      console.error("错误类型:", typeof error)
+      console.error("错误值:", error)
+      console.error("错误字符串:", String(error))
+      console.error("错误JSON:", JSON.stringify(error))
+      
+      if (typeof error === 'string' && error.includes("用户取消了选择")) {
+        console.log("用户取消了选择，不显示错误")
+      } else {
+        console.log("显示选择文件失败错误")
         toast.error("选择文件失败")
       }
     }
+    console.log("=== 文件对话框结束 ===")
   }
 
   const handleSave = async () => {
@@ -59,7 +94,7 @@ export function ConfigPathManager({ open, onOpenChange }: ConfigPathManagerProps
 
     try {
       // Save the config path to local database
-      await invoke("save_config_path", { path: configPath.trim() })
+      await invokeTauri("save_config_path", { path: configPath.trim() })
       toast.success("配置文件路径保存成功")
       onOpenChange(false)
     } catch (error) {
@@ -72,7 +107,7 @@ export function ConfigPathManager({ open, onOpenChange }: ConfigPathManagerProps
   const loadCurrentPath = async () => {
     try {
       console.log("Loading current config path...")
-      const path = await invoke<string>("get_config_path")
+      const path = await invokeTauri<string>("get_config_path")
       console.log("Loaded config path:", path)
       setConfigPath(path || "~/.claude/settings.json")
     } catch (error) {
@@ -85,8 +120,6 @@ export function ConfigPathManager({ open, onOpenChange }: ConfigPathManagerProps
     <Dialog open={open} onOpenChange={(newOpen) => {
       if (newOpen) {
         loadCurrentPath()
-      } else {
-        setConfigPath("~/.claude/settings.json")
       }
       onOpenChange(newOpen)
     }}>

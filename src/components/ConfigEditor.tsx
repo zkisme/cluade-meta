@@ -1,5 +1,40 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+// Helper function to safely invoke Tauri commands
+const invokeTauri = async <T,>(command: string, args?: any): Promise<T> => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<T>(command, args);
+  } catch (importError) {
+    console.warn(`Failed to import Tauri API:`, importError);
+    throw new Error('Tauri environment not available');
+  }
+};
+
+// Helper function to check if we're in Tauri environment
+const isTauriEnvironment = async (): Promise<boolean> => {
+  console.log("🔍 [DEBUG] ConfigEditor isTauriEnvironment被调用");
+  try {
+    console.log("🔍 [DEBUG] ConfigEditor 尝试导入isTauri函数");
+    // Use the official Tauri v2 isTauri() function
+    const { isTauri } = await import('@tauri-apps/api/core');
+    console.log("🔍 [DEBUG] ConfigEditor 成功导入isTauri函数");
+    const result = isTauri();
+    console.log("🔍 [DEBUG] ConfigEditor isTauri()结果:", result);
+    return result;
+  } catch (error) {
+    console.log("🔍 [DEBUG] ConfigEditor isTauri()失败，尝试fallback:", error);
+    // Fallback: check if we can access Tauri APIs
+    try {
+      console.log("🔍 [DEBUG] ConfigEditor 尝试导入@tauri-apps/api/core");
+      await import('@tauri-apps/api/core');
+      console.log("🔍 [DEBUG] ConfigEditor 成功导入@tauri-apps/api/core，返回true");
+      return true;
+    } catch (importError) {
+      console.log("🔍 [DEBUG] ConfigEditor 导入@tauri-apps/api/core失败:", importError);
+      return false;
+    }
+  }
+};
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -27,22 +62,38 @@ export function ConfigEditor({ onConfigSaved, open, onOpenChange }: ConfigEditor
   const [validationError, setValidationError] = useState("");
 
   const loadConfigContent = async () => {
+    console.log("🔍 [DEBUG] ConfigEditor loadConfigContent被调用");
     try {
-      const content = await invoke<string>("get_config_file_content");
+      // Check if we're in browser environment first
+      console.log("🔍 [DEBUG] ConfigEditor检查Tauri环境...");
+      const isTauri = await isTauriEnvironment();
+      console.log("🔍 [DEBUG] ConfigEditor isTauri结果:", isTauri);
+      if (!isTauri) {
+        console.log('🔍 [DEBUG] ConfigEditor 浏览器环境检测到，跳过Tauri API调用');
+        setConfigContent("{}");
+        setOriginalContent("{}");
+        return;
+      }
+      
+      console.log("🔍 [DEBUG] ConfigEditor 调用get_config_file_content命令");
+      const content = await invokeTauri<string>("get_config_file_content");
+      console.log("🔍 [DEBUG] ConfigEditor 成功获取配置内容，长度:", content?.length);
       setConfigContent(content);
       setOriginalContent(content);
       setHasChanges(false);
       setIsValidJson(true);
       setValidationError("");
     } catch (error) {
-      console.error("Failed to load config content:", error);
+      console.error("🔍 [DEBUG] ConfigEditor 加载配置内容失败:", error);
       setConfigContent("{}");
       setOriginalContent("{}");
     }
   };
 
   useEffect(() => {
+    console.log("🔍 [DEBUG] ConfigEditor isOpen状态变化:", isOpen);
     if (isOpen) {
+      console.log("🔍 [DEBUG] ConfigEditor开始加载配置内容");
       loadConfigContent();
     }
   }, [isOpen]);
@@ -70,7 +121,15 @@ export function ConfigEditor({ onConfigSaved, open, onOpenChange }: ConfigEditor
     
     setIsSaving(true);
     try {
-      await invoke<boolean>("save_config_file_content", { content: configContent });
+      // Check if we're in browser environment first
+      const isTauri = await isTauriEnvironment();
+      if (!isTauri) {
+        console.log('Browser environment detected, skipping Tauri API calls');
+        setValidationError("浏览器环境：无法保存配置文件");
+        return;
+      }
+      
+      await invokeTauri<boolean>("save_config_file_content", { content: configContent });
       setOriginalContent(configContent);
       setHasChanges(false);
       onConfigSaved?.();
