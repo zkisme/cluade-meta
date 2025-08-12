@@ -6,8 +6,8 @@ import { ConfigType } from "@/types/config";
 import { toast } from "sonner";
 
 export interface ApiKeyData {
-  anthropic_auth_token: string;
-  anthropic_base_url?: string;
+  ANTHROPIC_AUTH_TOKEN: string;
+  ANTHROPIC_BASE_URL?: string;
 }
 
 export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
@@ -17,8 +17,8 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
   description: "管理Claude Code的API密钥配置",
   icon: Key,
   defaultData: {
-    anthropic_auth_token: "",
-    anthropic_base_url: "https://api.anthropic.com",
+    ANTHROPIC_AUTH_TOKEN: "",
+    ANTHROPIC_BASE_URL: "https://api.anthropic.com",
   },
   formComponent: ({ data, onChange }) => (
     <div className="space-y-4">
@@ -26,8 +26,8 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
         <label className="text-sm font-medium">ANTHROPIC_AUTH_TOKEN</label>
         <input
           type="password"
-          value={data.anthropic_auth_token}
-          onChange={(e) => onChange({ ...data, anthropic_auth_token: e.target.value })}
+          value={data.ANTHROPIC_AUTH_TOKEN}
+          onChange={(e) => onChange({ ...data, ANTHROPIC_AUTH_TOKEN: e.target.value })}
           className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
           placeholder="请输入API密钥"
         />
@@ -36,13 +36,13 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
         <label className="text-sm font-medium">ANTHROPIC_BASE_URL</label>
         <input
           type="text"
-          value={data.anthropic_base_url || ""}
-          onChange={(e) => onChange({ ...data, anthropic_base_url: e.target.value })}
+          value={data.ANTHROPIC_BASE_URL || ""}
+          onChange={(e) => onChange({ ...data, ANTHROPIC_BASE_URL: e.target.value })}
           className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
           placeholder="https://api.anthropic.com"
         />
       </div>
-    </div>
+          </div>
   ),
   listComponent: ({ item, isActive, onToggleActive, onEdit, onDelete }) => {
     const copyToClipboard = (text: string) => {
@@ -51,7 +51,7 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
     };
 
     const copyApiKey = () => {
-      copyToClipboard(item.data.anthropic_auth_token);
+      copyToClipboard(item.data.ANTHROPIC_AUTH_TOKEN);
     };
 
     return (
@@ -65,17 +65,18 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
           <div className="flex items-center space-x-2 mb-1">
             <span className="text-xs text-muted-foreground">ANTHROPIC_AUTH_TOKEN:</span>
             <code className="text-xs bg-muted px-2 py-1 rounded font-mono truncate flex-1">
-              {item.data.anthropic_auth_token}
+              {item.data.ANTHROPIC_AUTH_TOKEN}
             </code>
           </div>
           
-          {item.data.anthropic_base_url && (
+          {item.data.ANTHROPIC_BASE_URL && (
             <div className="mb-1">
               <span className="text-xs text-muted-foreground">ANTHROPIC_BASE_URL: </span>
-              <span className="text-xs">{item.data.anthropic_base_url}</span>
+              <span className="text-xs">{item.data.ANTHROPIC_BASE_URL}</span>
             </div>
           )}
           
+                    
           {item.description && (
             <div className="mb-1">
               <span className="text-xs text-muted-foreground">描述: </span>
@@ -121,11 +122,11 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
       const { isTauri } = await import('@tauri-apps/api/core');
       if (await isTauri()) {
         const { invoke } = await import('@tauri-apps/api/core');
-        const { anthropic_auth_token, anthropic_base_url } = data;
+        const { ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL } = data;
         await invoke('update_config_env', { 
           configPath, 
-          apiKey: anthropic_auth_token, 
-          baseUrl: anthropic_base_url 
+          apiKey: ANTHROPIC_AUTH_TOKEN, 
+          baseUrl: ANTHROPIC_BASE_URL
         });
       }
     } catch (error) {

@@ -121,6 +121,24 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       setItems(prev => [result, ...prev]);
       setIsFormDialogOpen(false);
       setEditingItem(null);
+      
+      // If config type has onConfigUpdate, call it with the new item's data
+      if (configType.onConfigUpdate) {
+        try {
+          // Get the actual config path from the backend
+          const actualConfigPath = await invokeTauri<string>('get_config_path');
+          await configType.onConfigUpdate(result.data, actualConfigPath);
+          toast.success(`${configType.displayName}配置文件已更新`);
+        } catch (error) {
+          console.error("Failed to update config file:", error);
+          if (error instanceof Error && error.message === 'Tauri environment not available') {
+            toast.error(`浏览器环境：无法更新${configType.displayName}配置文件`);
+          } else {
+            toast.error("更新配置文件失败");
+          }
+        }
+      }
+      
       toast.success(`${configType.displayName}创建成功`);
     } catch (error) {
       console.error(`Failed to create ${configType.name}:`, error);
@@ -138,6 +156,24 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       setItems(prev => prev.map(item => item.id === id ? result : item));
       setIsFormDialogOpen(false);
       setEditingItem(null);
+      
+      // If config type has onConfigUpdate, call it with the updated item's data
+      if (configType.onConfigUpdate) {
+        try {
+          // Get the actual config path from the backend
+          const actualConfigPath = await invokeTauri<string>('get_config_path');
+          await configType.onConfigUpdate(result.data, actualConfigPath);
+          toast.success(`${configType.displayName}配置文件已更新`);
+        } catch (error) {
+          console.error("Failed to update config file:", error);
+          if (error instanceof Error && error.message === 'Tauri environment not available') {
+            toast.error(`浏览器环境：无法更新${configType.displayName}配置文件`);
+          } else {
+            toast.error("更新配置文件失败");
+          }
+        }
+      }
+      
       toast.success(`${configType.displayName}更新成功`);
     } catch (error) {
       console.error(`Failed to update ${configType.name}:`, error);

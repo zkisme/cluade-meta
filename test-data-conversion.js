@@ -5,21 +5,21 @@ import { execSync } from 'child_process';
 
 try {
   // Test the new API endpoint
-  const result = execSync('sqlite3 "/Users/kay/Library/Application Support/com.config-meta.app/api_keys/claude_keys.db" "SELECT id, name, key, description, anthropic_base_url, created_at, updated_at FROM api_keys LIMIT 1;"', { encoding: 'utf8' });
+  const result = execSync('sqlite3 "/Users/kay/Library/Application Support/com.config-meta.app/api_keys/claude_keys.db" "SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys LIMIT 1;"', { encoding: 'utf8' });
   
   console.log('Raw database data:');
   console.log(result);
   
   // Parse the raw data
-  const [id, name, key, description, anthropic_base_url, created_at, updated_at] = result.trim().split('|');
+  const [id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at] = result.trim().split('|');
   
   console.log('\nConverted to ConfigItem format:');
   console.log(JSON.stringify({
     id,
     name,
     data: {
-      key,
-      anthropic_base_url: anthropic_base_url || null
+      ANTHROPIC_AUTH_TOKEN: ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_BASE_URL: ANTHROPIC_BASE_URL || null
     },
     description: description || null,
     created_at,

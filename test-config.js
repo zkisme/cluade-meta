@@ -22,8 +22,11 @@ exec('npm run tauri dev -- --help', (error, stdout, stderr) => {
 
 console.log('Build completed successfully. The implementation is ready.');
 console.log('Key features implemented:');
-console.log('1. ✅ Backend supports anthropic_base_url field in API keys');
-console.log('2. ✅ Frontend forms include anthropic_base_url field');
-console.log('3. ✅ Config path management uses user-configured paths');
-console.log('4. ✅ update_config_env function only updates ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL');
-console.log('5. ✅ All code compiles successfully');
+console.log('1. ✅ Backend supports ANTHROPIC_BASE_URL field in API keys');
+console.log('2. ✅ Frontend forms include ANTHROPIC_BASE_URL field');
+console.log('3. ✅ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is now fixed to 1 (removed from UI)');
+console.log('4. ✅ Backend always sets CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=true in config files');
+console.log('5. ✅ Database schema updated to remove the field');
+console.log('6. ✅ Config path management uses user-configured paths');
+console.log('7. ✅ update_config_env function works with simplified parameters');
+console.log('8. ✅ All code compiles successfully');

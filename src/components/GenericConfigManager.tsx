@@ -84,7 +84,8 @@ export const GenericConfigManager = forwardRef<any, GenericConfigManagerProps>(
     // Load items are handled by the useConfigManager hook
 
     const handleToggleActive = async (id: string) => {
-      setActiveItemId(id === activeItemId ? null : id);
+      const newActiveItemId = id === activeItemId ? null : id;
+      setActiveItemId(newActiveItemId);
       
       // If config type has setActive endpoint, call it
       if (configType.apiEndpoints.setActive) {
@@ -97,6 +98,30 @@ export const GenericConfigManager = forwardRef<any, GenericConfigManagerProps>(
             toast.error(`浏览器环境：无法更新${configType.displayName}状态`);
           } else {
             toast.error("更新状态失败");
+          }
+        }
+      }
+      
+      // If config type has onConfigUpdate, call it with the active item's data
+      if (configType.onConfigUpdate) {
+        try {
+          // Get the actual config path from the backend
+          const actualConfigPath = await invokeTauri<string>('get_config_path');
+          const activeItem = newActiveItemId ? items.find(item => item.id === newActiveItemId) : null;
+          if (activeItem) {
+            await configType.onConfigUpdate(activeItem.data, actualConfigPath);
+            toast.success(`${configType.displayName}配置文件已更新`);
+          } else if (newActiveItemId === null) {
+            // If no active item, update with default data
+            await configType.onConfigUpdate(configType.defaultData, actualConfigPath);
+            toast.success(`${configType.displayName}配置文件已重置为默认值`);
+          }
+        } catch (error) {
+          console.error("Failed to update config file:", error);
+          if (error instanceof Error && error.message === 'Tauri environment not available') {
+            toast.error(`浏览器环境：无法更新${configType.displayName}配置文件`);
+          } else {
+            toast.error("更新配置文件失败");
           }
         }
       }

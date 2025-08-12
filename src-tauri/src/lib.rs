@@ -10,9 +10,9 @@ use serde_json;
 pub struct ApiKey {
     pub id: String,
     pub name: String,
-    pub anthropic_auth_token: String,
+    pub ANTHROPIC_AUTH_TOKEN: String,
     pub description: Option<String>,
-    pub anthropic_base_url: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -96,23 +96,23 @@ pub struct UpdateRouteConfigRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    pub anthropic_auth_token: String,
+    pub ANTHROPIC_AUTH_TOKEN: String,
     pub description: Option<String>,
-    pub anthropic_base_url: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
-    pub anthropic_auth_token: Option<String>,
+    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
     pub description: Option<String>,
-    pub anthropic_base_url: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeSettings {
-    pub anthropic_auth_token: Option<String>,
-    pub anthropic_base_url: Option<String>,
+    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
@@ -126,9 +126,8 @@ pub struct ClaudeSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
-    pub anthropic_auth_token: Option<String>,
-    pub anthropic_base_url: Option<String>,
-    pub claude_code_disable_nonessential_traffic: Option<u32>,
+    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -180,16 +179,16 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS api_keys (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            anthropic_auth_token TEXT NOT NULL,
+            ANTHROPIC_AUTH_TOKEN TEXT NOT NULL,
             description TEXT,
-            anthropic_base_url TEXT,
+            ANTHROPIC_BASE_URL TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )",
         (),
     )?;
 
-    // Check if we need to migrate from old schema (key column to anthropic_auth_token)
+    // Check if we need to migrate from old schema (key column to ANTHROPIC_AUTH_TOKEN)
     let has_key_column: Result<bool> = conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'key'",
         [],
@@ -197,9 +196,49 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
     );
 
     if let Ok(true) = has_key_column {
-        // Migration needed: rename key column to anthropic_auth_token
+        // Migration needed: rename key column to ANTHROPIC_AUTH_TOKEN
         conn.execute(
-            "ALTER TABLE api_keys RENAME COLUMN key TO anthropic_auth_token",
+            "ALTER TABLE api_keys RENAME COLUMN key TO ANTHROPIC_AUTH_TOKEN",
+            (),
+        ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
+    }
+
+    // Check if we need to migrate from lowercase to uppercase column names
+    let has_lowercase_columns: Result<i64> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name IN ('anthropic_auth_token', 'anthropic_base_url')",
+        [],
+        |row| row.get(0),
+    );
+
+    if let Ok(count) = has_lowercase_columns {
+        if count > 0 {
+            // Migration needed: rename lowercase columns to uppercase
+            if count >= 1 {
+                conn.execute(
+                    "ALTER TABLE api_keys RENAME COLUMN anthropic_auth_token TO ANTHROPIC_AUTH_TOKEN",
+                    (),
+                ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
+            }
+            if count >= 2 {
+                conn.execute(
+                    "ALTER TABLE api_keys RENAME COLUMN anthropic_base_url TO ANTHROPIC_BASE_URL",
+                    (),
+                ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
+            }
+        }
+    }
+
+    // Check if CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC column exists and remove it
+    let has_disable_traffic_column: Result<bool> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'",
+        [],
+        |row| row.get(0),
+    );
+
+    if let Ok(true) = has_disable_traffic_column {
+        // Remove the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC column
+        conn.execute(
+            "ALTER TABLE api_keys DROP COLUMN CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
             (),
         ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
     }
@@ -290,16 +329,16 @@ async fn create_api_key(
     let api_key = ApiKey {
         id: uuid::Uuid::new_v4().to_string(),
         name: request.name,
-        anthropic_auth_token: request.anthropic_auth_token,
+        ANTHROPIC_AUTH_TOKEN: request.ANTHROPIC_AUTH_TOKEN,
         description: request.description,
-        anthropic_base_url: request.anthropic_base_url,
+        ANTHROPIC_BASE_URL: request.ANTHROPIC_BASE_URL,
         created_at: now.clone(),
         updated_at: now,
     };
 
     conn.execute(
-        "INSERT INTO api_keys (id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        (&api_key.id, &api_key.name, &api_key.anthropic_auth_token, &api_key.description, &api_key.anthropic_base_url, &api_key.created_at, &api_key.updated_at),
+        "INSERT INTO api_keys (id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        (&api_key.id, &api_key.name, &api_key.ANTHROPIC_AUTH_TOKEN, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.created_at, &api_key.updated_at),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -309,16 +348,16 @@ async fn create_api_key(
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
         Ok(ApiKey {
             id: row.get(0)?,
             name: row.get(1)?,
-            anthropic_auth_token: row.get(2)?,
+            ANTHROPIC_AUTH_TOKEN: row.get(2)?,
             description: row.get(3)?,
-            anthropic_base_url: row.get(4)?,
+            ANTHROPIC_BASE_URL: row.get(4)?,
             created_at: row.get(5)?,
             updated_at: row.get(6)?,
         })
@@ -344,23 +383,23 @@ pub struct ConfigItem<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiKeyData {
-    pub anthropic_auth_token: String,
-    pub anthropic_base_url: Option<String>,
+    pub ANTHROPIC_AUTH_TOKEN: String,
+    pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
 #[tauri::command]
 async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<ApiKeyData>>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
         let id: String = row.get(0)?;
         let name: String = row.get(1)?;
-        let anthropic_auth_token: String = row.get(2)?;
+        let ANTHROPIC_AUTH_TOKEN: String = row.get(2)?;
         let description: Option<String> = row.get(3)?;
-        let anthropic_base_url: Option<String> = row.get(4)?;
+        let ANTHROPIC_BASE_URL: Option<String> = row.get(4)?;
         let created_at: String = row.get(5)?;
         let updated_at: String = row.get(6)?;
         
@@ -368,8 +407,8 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
             id,
             name,
             data: ApiKeyData {
-                anthropic_auth_token,
-                anthropic_base_url,
+                ANTHROPIC_AUTH_TOKEN,
+                ANTHROPIC_BASE_URL,
             },
             description,
             created_at,
@@ -395,15 +434,15 @@ async fn update_api_key(
 
     // Check if the API key exists
     let existing_key: Option<ApiKey> = conn.query_row(
-        "SELECT id, name, anthropic_auth_token, description, anthropic_base_url, created_at, updated_at FROM api_keys WHERE id = ?1",
+        "SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys WHERE id = ?1",
         [&id],
         |row| {
             Ok(ApiKey {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                anthropic_auth_token: row.get(2)?,
+                ANTHROPIC_AUTH_TOKEN: row.get(2)?,
                 description: row.get(3)?,
-                anthropic_base_url: row.get(4)?,
+                ANTHROPIC_BASE_URL: row.get(4)?,
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
             })
@@ -415,20 +454,20 @@ async fn update_api_key(
     if let Some(name) = request.name {
         api_key.name = name;
     }
-    if let Some(anthropic_auth_token) = request.anthropic_auth_token {
-        api_key.anthropic_auth_token = anthropic_auth_token;
+    if let Some(ANTHROPIC_AUTH_TOKEN) = request.ANTHROPIC_AUTH_TOKEN {
+        api_key.ANTHROPIC_AUTH_TOKEN = ANTHROPIC_AUTH_TOKEN;
     }
     if let Some(description) = request.description {
         api_key.description = Some(description);
     }
-    if let Some(anthropic_base_url) = request.anthropic_base_url {
-        api_key.anthropic_base_url = Some(anthropic_base_url);
+    if let Some(ANTHROPIC_BASE_URL) = request.ANTHROPIC_BASE_URL {
+        api_key.ANTHROPIC_BASE_URL = Some(ANTHROPIC_BASE_URL);
     }
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE api_keys SET name = ?1, anthropic_auth_token = ?2, description = ?3, anthropic_base_url = ?4, updated_at = ?5 WHERE id = ?6",
-        (&api_key.name, &api_key.anthropic_auth_token, &api_key.description, &api_key.anthropic_base_url, &api_key.updated_at, &id),
+        "UPDATE api_keys SET name = ?1, ANTHROPIC_AUTH_TOKEN = ?2, description = ?3, ANTHROPIC_BASE_URL = ?4, updated_at = ?5 WHERE id = ?6",
+        (&api_key.name, &api_key.ANTHROPIC_AUTH_TOKEN, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.updated_at, &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -565,8 +604,8 @@ async fn get_claude_settings(path: String) -> Result<String, String> {
         
         // Create default settings
         let default_settings = ClaudeSettings {
-            anthropic_auth_token: None,
-            anthropic_base_url: Some("https://api.anthropic.com".to_string()),
+            ANTHROPIC_AUTH_TOKEN: None,
+            ANTHROPIC_BASE_URL: Some("https://api.anthropic.com".to_string()),
             model: Some("claude-3-5-sonnet-20241022".to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -988,71 +1027,85 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
     println!("Base URL: {:?}", base_url);
     println!("Settings file path: {:?}", settings_file);
     
-    // Read existing config or create default with the correct format
-    let mut config: ConfigFileFormat = if settings_file.exists() {
+    // Template configuration structure
+    let template_config = serde_json::json!({
+        "env": {
+            "ANTHROPIC_AUTH_TOKEN": "",
+            "ANTHROPIC_BASE_URL": "https://api.packycode.com",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1
+        },
+        "permissions": {
+            "allow": [],
+            "deny": []
+        },
+        "apiKeyHelper": "echo 'your-api-key-here'"
+    });
+    
+    // Read existing config or use template
+    let mut config_obj = if settings_file.exists() {
         let content = fs::read_to_string(&settings_file)
             .map_err(|e| format!("Failed to read settings file: {}", e))?;
         
-        // Try to parse as the new format first
-        if let Ok(new_format) = serde_json::from_str::<ConfigFileFormat>(&content) {
-            new_format
-        } else {
-            // If it fails, try to parse as the old format and convert
-            let old_settings: ClaudeSettings = serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse settings file: {}", e))?;
-            
-            // Convert old format to new format
-            let auth_token = old_settings.anthropic_auth_token.clone();
-            ConfigFileFormat {
-                env: EnvConfig {
-                    anthropic_auth_token: auth_token.clone(),
-                    anthropic_base_url: old_settings.anthropic_base_url,
-                    claude_code_disable_nonessential_traffic: Some(1),
-                },
-                permissions: PermissionsConfig {
-                    allow: Some(vec![]),
-                    deny: Some(vec![]),
-                },
-                api_key_helper: auth_token
-                    .map(|token| format!("echo '{}'", token)),
-            }
-        }
+        // Parse existing config to preserve structure
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse settings file: {}", e))?
     } else {
         // Create directory if it doesn't exist
         if let Some(parent) = settings_file.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
         
-        // Create default settings with the correct format
-        ConfigFileFormat {
-            env: EnvConfig {
-                anthropic_auth_token: None,
-                anthropic_base_url: Some("https://api.anthropic.com".to_string()),
-                claude_code_disable_nonessential_traffic: Some(1),
-            },
-            permissions: PermissionsConfig {
-                allow: Some(vec![]),
-                deny: Some(vec![]),
-            },
-            api_key_helper: None,
-        }
+        // Use template as base
+        template_config.clone()
     };
     
-    // Update only the anthropic_auth_token and anthropic_base_url fields
+    // Update only specific fields while preserving the structure
+    if let Some(env_obj) = config_obj.get_mut("env") {
+        if let Some(env_map) = env_obj.as_object_mut() {
+            // Update ANTHROPIC_AUTH_TOKEN
+            if api_key.is_empty() {
+                env_map.remove("ANTHROPIC_AUTH_TOKEN");
+            } else {
+                env_map.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(api_key.clone()));
+            }
+            
+            // Update ANTHROPIC_BASE_URL if provided
+            if let Some(url) = base_url {
+                env_map.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(url));
+            }
+            
+            // Always ensure CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set to 1
+            env_map.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), serde_json::Value::Number(serde_json::Number::from(1)));
+        }
+    }
+    
+    // Update apiKeyHelper to match the API key
     if api_key.is_empty() {
-        config.env.anthropic_auth_token = None;
-        config.api_key_helper = None;
+        config_obj.as_object_mut().unwrap().remove("apiKeyHelper");
     } else {
-        config.env.anthropic_auth_token = Some(api_key.clone());
-        config.api_key_helper = Some(format!("echo '{}'", api_key));
+        config_obj.as_object_mut().unwrap().insert("apiKeyHelper".to_string(), serde_json::Value::String(format!("echo '{}'", api_key)));
     }
     
-    if let Some(url) = base_url {
-        config.env.anthropic_base_url = Some(url);
+    // Ensure permissions structure exists with correct array types
+    if let Some(perm_obj) = config_obj.get_mut("permissions") {
+        if let Some(perm_map) = perm_obj.as_object_mut() {
+            // Ensure allow is an array
+            if !perm_map.get("allow").map_or(false, |v| v.is_array()) {
+                perm_map.insert("allow".to_string(), serde_json::json!([]));
+            }
+            // Ensure deny is an array
+            if !perm_map.get("deny").map_or(false, |v| v.is_array()) {
+                perm_map.insert("deny".to_string(), serde_json::json!([]));
+            }
+        }
+    } else {
+        config_obj.as_object_mut().unwrap().insert("permissions".to_string(), serde_json::json!({
+            "allow": [],
+            "deny": []
+        }));
     }
     
-    // Write back to file
-    let content = serde_json::to_string_pretty(&config)
+    let content = serde_json::to_string_pretty(&config_obj)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     
     fs::write(&settings_file, content)
