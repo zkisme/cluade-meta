@@ -1,9 +1,10 @@
 import { Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Edit, Trash2, Copy } from "lucide-react";
+import { Edit, Trash2, Copy, Eye, EyeOff } from "lucide-react";
 import { ConfigType } from "@/types/config";
 import { toast } from "sonner";
+import { useState } from "react";
 
 export interface ApiKeyData {
   ANTHROPIC_AUTH_TOKEN: string;
@@ -45,6 +46,8 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
           </div>
   ),
   listComponent: ({ item, isActive, onToggleActive, onEdit, onDelete }) => {
+    const [showKey, setShowKey] = useState(false);
+    
     const copyToClipboard = (text: string) => {
       navigator.clipboard.writeText(text);
       toast.success('已复制到剪贴板');
@@ -52,6 +55,18 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
 
     const copyApiKey = () => {
       copyToClipboard(item.data.ANTHROPIC_AUTH_TOKEN);
+    };
+
+    const maskApiKey = (key: string) => {
+      if (key.length <= 8) return key;
+      const start = key.slice(0, 4);
+      const end = key.slice(-4);
+      const middle = '*'.repeat(Math.min(key.length - 8, 20));
+      return `${start}${middle}${end}`;
+    };
+
+    const toggleKeyVisibility = () => {
+      setShowKey(!showKey);
     };
 
     return (
@@ -62,10 +77,10 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
             <h3 className="text-sm font-medium truncate">{item.name}</h3>
           </div>
           
-          <div className="flex items-center space-x-2 mb-1">
-            <span className="text-xs text-muted-foreground">ANTHROPIC_AUTH_TOKEN:</span>
-            <code className="text-xs bg-muted px-2 py-1 rounded font-mono truncate flex-1">
-              {item.data.ANTHROPIC_AUTH_TOKEN}
+          <div className="mb-1">
+            <div className="text-xs text-muted-foreground mb-1">ANTHROPIC_AUTH_TOKEN:</div>
+            <code className="text-xs bg-muted px-2 py-1 rounded font-mono block break-all whitespace-pre-wrap">
+              {showKey ? item.data.ANTHROPIC_AUTH_TOKEN : maskApiKey(item.data.ANTHROPIC_AUTH_TOKEN)}
             </code>
           </div>
           
@@ -90,6 +105,15 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
         </div>
         
         <div className="flex space-x-1 ml-2">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={toggleKeyVisibility} 
+            className="h-6 w-6 p-0"
+            title={showKey ? "隐藏密钥" : "显示密钥"}
+          >
+            {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+          </Button>
           <Button 
             variant="ghost" 
             size="sm" 
