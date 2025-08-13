@@ -4,7 +4,28 @@ import { Switch } from "@/components/ui/switch";
 import { Edit, Trash2, Copy, Eye, EyeOff } from "lucide-react";
 import { ConfigType } from "@/types/config";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+// 简化的全局重置机制
+let globalResetTrigger = 1; // 从1开始，避免与初始useState(0)冲突
+const resetListeners = new Set<() => void>();
+
+export const resetAllKeyVisibility = () => {
+  globalResetTrigger++;
+  resetListeners.forEach(listener => listener());
+};
+
+const useGlobalReset = () => {
+  const [resetTrigger, setResetTrigger] = useState(0);
+  
+  useEffect(() => {
+    const listener = () => setResetTrigger(globalResetTrigger);
+    resetListeners.add(listener);
+    return () => resetListeners.delete(listener);
+  }, []);
+  
+  return resetTrigger;
+};
 
 export interface ApiKeyData {
   ANTHROPIC_AUTH_TOKEN: string;
@@ -47,6 +68,14 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
   ),
   listComponent: ({ item, isActive, onToggleActive, onEdit, onDelete }) => {
     const [showKey, setShowKey] = useState(false);
+    const resetTrigger = useGlobalReset();
+    
+    // 当全局重置触发时，强制重置为false
+    useEffect(() => {
+      if (resetTrigger > 0) { // 只有实际重置时才执行，避免初始化干扰
+        setShowKey(false);
+      }
+    }, [resetTrigger]);
     
     const copyToClipboard = (text: string) => {
       navigator.clipboard.writeText(text);

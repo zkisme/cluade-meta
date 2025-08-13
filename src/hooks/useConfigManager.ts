@@ -39,6 +39,69 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
   const [backupFiles, setBackupFiles] = useState<BackupFile[]>([]);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
 
+  // 同步活跃配置与实际配置文件
+  const syncActiveConfigWithFile = async (configItems: ConfigItem<T>[]) => {
+    if (configType.id !== 'claude-code') return;
+    
+    try {
+      console.log('Starting syncActiveConfigWithFile...');
+      console.log('Current activeItemId:', activeItemId);
+      console.log('Config items:', configItems.map((item: any) => ({ id: item.id, name: item.name, key: item.data.ANTHROPIC_AUTH_TOKEN?.slice(0, 10) + '...' })));
+      
+      // 读取实际配置文件内容
+      const configPath = await invokeTauri<string>('get_config_path');
+      console.log('Config path:', configPath);
+      
+      const fileContent = await invokeTauri<string>('read_config_file', { configPath });
+      console.log('File content length:', fileContent.length);
+      
+      const configData = JSON.parse(fileContent);
+      console.log('Parsed config data keys:', Object.keys(configData));
+      console.log('Full config data:', configData);
+      
+      // 查找API密钥，可能在不同的位置
+      let actualApiKey = null;
+      
+      // 检查根级别
+      if (configData.ANTHROPIC_AUTH_TOKEN) {
+        actualApiKey = configData.ANTHROPIC_AUTH_TOKEN;
+        console.log('Found API key at root level');
+      }
+      // 检查env对象中
+      else if (configData.env && configData.env.ANTHROPIC_AUTH_TOKEN) {
+        actualApiKey = configData.env.ANTHROPIC_AUTH_TOKEN;
+        console.log('Found API key in env object');
+      }
+      // 检查其他可能的位置
+      else if (configData.apiKeyHelper && configData.apiKeyHelper.ANTHROPIC_AUTH_TOKEN) {
+        actualApiKey = configData.apiKeyHelper.ANTHROPIC_AUTH_TOKEN;
+        console.log('Found API key in apiKeyHelper object');
+      }
+      
+      console.log('Actual API key from file:', actualApiKey?.slice(0, 10) + '...');
+      
+      if (actualApiKey) {
+        const matchingItem = configItems.find((item: any) => 
+          item.data.ANTHROPIC_AUTH_TOKEN === actualApiKey
+        );
+        
+        console.log('Matching item found:', matchingItem ? { id: matchingItem.id, name: matchingItem.name } : 'none');
+        
+        if (matchingItem && matchingItem.id !== activeItemId) {
+          console.log('Config file mismatch detected, syncing active item from', activeItemId, 'to', matchingItem.id);
+          setActiveItemId(matchingItem.id);
+          localStorage.setItem(`active_${configType.id}`, matchingItem.id);
+        } else {
+          console.log('No sync needed - either no match or already correct');
+        }
+      } else {
+        console.log('No ANTHROPIC_AUTH_TOKEN found in config file');
+      }
+    } catch (error) {
+      console.warn('Failed to sync active config with file:', error);
+    }
+  };
+
   // Load active item ID from localStorage on mount
   useEffect(() => {
     const savedActiveItemId = localStorage.getItem(`active_${configType.id}`);
@@ -56,7 +119,7 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
     }
   }, [activeItemId, configType.id]);
 
-  // Sync active item with items list
+  // Sync active item with items list and config file
   useEffect(() => {
     if (activeItemId && items.length > 0) {
       const activeItemExists = items.some(item => item.id === activeItemId);
@@ -64,6 +127,11 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
         setActiveItemId(null);
         localStorage.removeItem(`active_${configType.id}`);
       }
+    }
+    
+    // 如果是Claude Code配置且有数据，执行配置文件同步
+    if (configType.id === 'claude-code' && items.length > 0) {
+      syncActiveConfigWithFile(items);
     }
   }, [items, activeItemId, configType.id]);
 
@@ -92,6 +160,16 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       
       console.log(`Loaded ${result.length} ${configType.name} items`);
       setItems(result);
+      
+      // 如果是Claude Code配置，重置密钥显示状态
+      if (configType.id === 'claude-code') {
+        try {
+          const { resetAllKeyVisibility } = await import('@/config/claudeCode');
+          resetAllKeyVisibility();
+        } catch (error) {
+          console.warn('Failed to reset key visibility:', error);
+        }
+      }
     } catch (error) {
       console.error(`Failed to load ${configType.name}:`, error);
       // In browser environment, set empty items instead of showing error
