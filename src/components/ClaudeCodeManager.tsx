@@ -196,15 +196,6 @@ export const ClaudeCodeManager = forwardRef<any, ClaudeCodeManagerProps>(({ onOp
             <Button
               variant="outline"
               size="sm"
-              onClick={viewConfigFile}
-              className="bg-white/50 border-blue-200 hover:bg-blue-100 text-blue-700 h-7 px-2 text-xs"
-            >
-              <Eye className="h-3 w-3 mr-1" />
-              查看配置文件
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
               onClick={backupConfig}
               className="bg-white/50 border-green-200 hover:bg-green-100 text-green-700 h-7 px-2 text-xs"
             >
@@ -223,15 +214,6 @@ export const ClaudeCodeManager = forwardRef<any, ClaudeCodeManagerProps>(({ onOp
             <Button
               variant="outline"
               size="sm"
-              onClick={selectConfigPath}
-              className="bg-white/50 border-purple-200 hover:bg-purple-100 text-purple-700 h-7 px-2 text-xs"
-            >
-              <FolderOpen className="h-3 w-3 mr-1" />
-              设置路径
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
               onClick={() => {
                 viewConfigFile().then(() => setIsEditingConfig(true));
               }}
@@ -243,10 +225,30 @@ export const ClaudeCodeManager = forwardRef<any, ClaudeCodeManagerProps>(({ onOp
           </div>
           {configPath && (
             <div className="mt-2 p-1.5 bg-white/30 rounded-md">
-              <p className="text-xs text-green-800">
-                <FileText className="h-2.5 w-2.5 inline mr-1" />
-                配置文件路径: <code className="bg-white/50 px-1 py-0.5 rounded text-[10px]">{configPath}</code>
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-green-800">
+                  <FileText className="h-2.5 w-2.5 inline mr-1" />
+                  配置文件路径: <code className="bg-white/50 px-1 py-0.5 rounded text-[10px]">{configPath}</code>
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={viewConfigFile}
+                    className="h-5 px-2 py-0 text-xs text-green-700 hover:text-green-800 hover:bg-green-100/50"
+                  >
+                    查看
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={selectConfigPath}
+                    className="h-5 px-2 py-0 text-xs text-green-700 hover:text-green-800 hover:bg-green-100/50"
+                  >
+                    修改
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </CardContent>
