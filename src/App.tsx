@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { MainContent } from "@/components/MainContent";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -29,22 +29,51 @@ import {
 } from "@/components/ui/sidebar";
 import { Settings, Home, FolderOpen } from "lucide-react";
 import { ConfigPathManager } from "@/components/ConfigPathManager";
+import { featureDetection, FeatureStatus } from "@/services/featureDetection";
 
 import { configTypes } from "@/config/index";
 
-// Menu items derived from config types
-const items = configTypes.map(configType => ({
-  title: configType.displayName,
-  key: configType.id,
-  icon: configType.icon,
-}));
-
-type ActiveView = "overview" | "claude-code" | "claude-router" | "environment";
+type ActiveView = "overview" | "claude-code" | "claude-router";
 
 function AppContent() {
   const [activeView, setActiveView] = useState<ActiveView>("overview");
   const apiKeyManagerRef = useRef<any>(null);
   const [showConfigPathManager, setShowConfigPathManager] = useState(false);
+  const [installedFeatures, setInstalledFeatures] = useState<FeatureStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Check installed features on component mount
+  useEffect(() => {
+    const checkFeatures = async () => {
+      try {
+        const features = await featureDetection.getInstalledFeatures();
+        setInstalledFeatures(features);
+      } catch (error) {
+        console.error('Failed to check installed features:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    checkFeatures();
+  }, []);
+  
+  // Filter config types to only show installed features
+  const availableConfigTypes = configTypes.filter(configType => {
+    // Check if the feature is installed
+    return installedFeatures.some(feature => feature.feature_id === configType.id);
+  });
+  
+  // Sort available config types by feature name
+  const sortedConfigTypes = availableConfigTypes.sort((a, b) => {
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  const items = sortedConfigTypes.map(configType => ({
+    title: configType.displayName,
+    key: configType.id,
+    icon: configType.icon,
+  }));
   
   const handleMenuClick = (key: string) => {
     setActiveView(key as ActiveView);
@@ -80,6 +109,16 @@ function AppContent() {
     }
   };
 
+  const handleFeatureInstalled = async () => {
+    // Refresh feature list when a feature is installed
+    try {
+      const features = await featureDetection.getInstalledFeatures(true); // Force refresh
+      setInstalledFeatures(features);
+    } catch (error) {
+      console.error('Failed to refresh installed features:', error);
+    }
+  };
+
   return (
     <div className="flex h-screen w-full">
       <Sidebar>
@@ -95,6 +134,26 @@ function AppContent() {
           </div>
         </SidebarHeader>
         <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>系统信息</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={activeView === "overview"}
+                    onClick={() => setActiveView("overview")}
+                  >
+                    <a href="#" className="flex items-center gap-2">
+                      <Home />
+                      <span>概览</span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
           <SidebarGroup>
             <SidebarGroupLabel>配置管理</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -116,98 +175,26 @@ function AppContent() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-
-          <SidebarGroup>
-            <SidebarGroupLabel>系统信息</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={activeView === "overview"}
-                    onClick={() => setActiveView("overview")}
-                  >
-                    <a href="#" className="flex items-center gap-2">
-                      <Home />
-                      <span>概览</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
         </SidebarContent>
         <SidebarRail />
       </Sidebar>
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12 border-b">
+        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-2 px-4">
             <h1 className="text-xl font-semibold" id="main-title">
               概览
             </h1>
           </div>
-
-          {configTypes.some(ct => ct.id === activeView) && (
-            <div className="flex items-center gap-1 px-4">
-              <Tooltip>
-                <TooltipTrigger>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenCreateDialog}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={5}>
-                  <p>添加</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger>
-                  <Button variant="ghost" size="sm" onClick={handleViewConfig}>
-                    <FileText className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={5}>
-                  <p>查看</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger>
-                  <Button variant="ghost" size="sm">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleBackup}>
-                    <Download className="mr-2 h-4 w-4" />
-                    备份
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleRestore}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    恢复
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setShowConfigPathManager(true)}>
-                    <FolderOpen className="mr-2 h-4 w-4" />
-                    设置
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleOpenAdvancedEdit}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    高级编辑
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
         </header>
 
         <MainContent
           activeView={activeView}
           apiKeyManagerRef={apiKeyManagerRef}
+          onNavigate={(view) => setActiveView(view)}
+          installedFeatures={installedFeatures}
+          onFeatureInstalled={handleFeatureInstalled}
+          onOpenCreateDialog={handleOpenCreateDialog}
         />
       </main>
       

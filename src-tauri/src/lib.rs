@@ -5,6 +5,67 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use rusqlite::{Connection, Result, OptionalExtension};
 use serde_json;
+use std::collections::HashMap;
+
+// Claude Code Router 相关数据结构
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Transformer {
+    #[serde(rename = "use")]
+    pub use_transformers: Vec<serde_json::Value>,
+    #[serde(flatten)]
+    pub model_specific: HashMap<String, HashMap<String, Vec<serde_json::Value>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Provider {
+    pub name: String,
+    pub api_base_url: String,
+    pub api_key: String,
+    pub models: Vec<String>,
+    pub transformer: Option<Transformer>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RouterConfig {
+    pub default: Option<String>,
+    pub background: Option<String>,
+    pub think: Option<String>,
+    #[serde(rename = "longContext")]
+    pub long_context: Option<String>,
+    #[serde(rename = "longContextThreshold")]
+    pub long_context_threshold: Option<u32>,
+    #[serde(rename = "webSearch")]
+    pub web_search: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomTransformer {
+    pub path: String,
+    pub options: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClaudeCodeRouterConfig {
+    #[serde(rename = "APIKEY", skip_serializing_if = "Option::is_none")]
+    pub apikey: Option<String>,
+    #[serde(rename = "PROXY_URL", skip_serializing_if = "Option::is_none")]
+    pub proxy_url: Option<String>,
+    #[serde(rename = "LOG", skip_serializing_if = "Option::is_none")]
+    pub log: Option<bool>,
+    #[serde(rename = "HOST", skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(rename = "NON_INTERACTIVE_MODE", skip_serializing_if = "Option::is_none")]
+    pub non_interactive_mode: Option<bool>,
+    #[serde(rename = "API_TIMEOUT_MS", skip_serializing_if = "Option::is_none")]
+    pub api_timeout_ms: Option<u32>,
+    #[serde(rename = "CUSTOM_ROUTER_PATH", skip_serializing_if = "Option::is_none")]
+    pub custom_router_path: Option<String>,
+    #[serde(rename = "Providers")]
+    pub providers: Vec<Provider>,
+    #[serde(rename = "Router")]
+    pub router: RouterConfig,
+    pub transformers: Option<Vec<CustomTransformer>>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiKey {
@@ -15,36 +76,6 @@ pub struct ApiKey {
     pub ANTHROPIC_BASE_URL: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EnvironmentVariable {
-    pub id: String,
-    pub name: String,
-    pub key: String,
-    pub value: String,
-    pub scope: String,
-    pub description: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateEnvironmentVariableRequest {
-    pub name: String,
-    pub key: String,
-    pub value: String,
-    pub scope: String,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateEnvironmentVariableRequest {
-    pub name: Option<String>,
-    pub key: Option<String>,
-    pub value: Option<String>,
-    pub scope: Option<String>,
-    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -140,6 +171,7 @@ pub struct PermissionsConfig {
 pub struct ConfigFileFormat {
     pub env: EnvConfig,
     pub permissions: PermissionsConfig,
+    #[serde(rename = "apiKeyHelper")]
     pub api_key_helper: Option<String>,
 }
 
@@ -274,21 +306,6 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             content TEXT NOT NULL,
             size INTEGER NOT NULL,
             created_at TEXT NOT NULL
-        )",
-        (),
-    )?;
-
-    // Create the environment_variables table if it doesn't exist
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS environment_variables (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT NOT NULL,
-            scope TEXT NOT NULL,
-            description TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
         )",
         (),
     )?;
@@ -1079,7 +1096,8 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
         }
     }
     
-    // Update apiKeyHelper to match the API key
+    // Update apiKeyHelper to match the API key and clean up old field
+    config_obj.as_object_mut().unwrap().remove("api_key_helper"); // Remove old field name
     if api_key.is_empty() {
         config_obj.as_object_mut().unwrap().remove("apiKeyHelper");
     } else {
@@ -1115,170 +1133,371 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
     Ok(true)
 }
 
-// Environment Variables CRUD operations
-#[tauri::command]
-async fn create_environment_variable(
-    app: tauri::AppHandle,
-    request: CreateEnvironmentVariableRequest,
-) -> Result<EnvironmentVariable, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let env_var = EnvironmentVariable {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: request.name,
-        key: request.key,
-        value: request.value,
-        scope: request.scope,
-        description: request.description,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-
-    conn.execute(
-        "INSERT INTO environment_variables (id, name, key, value, scope, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        (&env_var.id, &env_var.name, &env_var.key, &env_var.value, &env_var.scope, &env_var.description, &env_var.created_at, &env_var.updated_at),
-    ).map_err(|e| e.to_string())?;
-
-    Ok(env_var)
+// Claude Code Router 配置管理
+fn get_router_config_path() -> std::path::PathBuf {
+    let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    home_dir.join(".claude-code-router").join("config.json")
 }
 
 #[tauri::command]
-async fn get_environment_variables(app: tauri::AppHandle) -> Result<Vec<EnvironmentVariable>, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
-
-    let mut stmt = conn.prepare("SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables ORDER BY created_at DESC")
-        .map_err(|e| e.to_string())?;
+async fn get_router_config() -> Result<ClaudeCodeRouterConfig, String> {
+    let config_path = get_router_config_path();
     
-    let env_vars = stmt.query_map([], |row| {
-        Ok(EnvironmentVariable {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            key: row.get(2)?,
-            value: row.get(3)?,
-            scope: row.get(4)?,
-            description: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut result = Vec::new();
-    for env_var in env_vars {
-        result.push(env_var.map_err(|e| e.to_string())?);
+    if !config_path.exists() {
+        // 返回默认配置
+        return Ok(ClaudeCodeRouterConfig {
+            apikey: None,
+            proxy_url: None,
+            log: None,
+            host: None,
+            non_interactive_mode: None,
+            api_timeout_ms: Some(600000),
+            custom_router_path: None,
+            providers: Vec::new(),
+            router: RouterConfig {
+                default: None,
+                background: None,
+                think: None,
+                long_context: None,
+                long_context_threshold: Some(60000),
+                web_search: None,
+            },
+            transformers: None,
+        });
     }
+    
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config file: {}", e))?;
+    
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config file: {}", e))
+}
 
-    Ok(result)
+#[tauri::command] 
+async fn update_router_config(config: ClaudeCodeRouterConfig) -> Result<bool, String> {
+    let config_path = get_router_config_path();
+    
+    // 创建目录（如果不存在）
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+    
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    
+    Ok(true)
+}
+
+#[tauri::command]
+async fn create_router_config(config: ClaudeCodeRouterConfig) -> Result<ClaudeCodeRouterConfig, String> {
+    update_router_config(config.clone()).await?;
+    Ok(config)
+}
+
+#[tauri::command]
+async fn get_raw_router_config() -> Result<String, String> {
+    let config_path = get_router_config_path();
+    
+    if !config_path.exists() {
+        // 创建默认配置文件
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+        
+        let default_config = ClaudeCodeRouterConfig {
+            apikey: None,
+            proxy_url: None,
+            log: None,
+            host: None,
+            non_interactive_mode: None,
+            api_timeout_ms: Some(600000),
+            custom_router_path: None,
+            providers: Vec::new(),
+            router: RouterConfig {
+                default: None,
+                background: None,
+                think: None,
+                long_context: None,
+                long_context_threshold: Some(60000),
+                web_search: None,
+            },
+            transformers: None,
+        };
+        
+        let content = serde_json::to_string_pretty(&default_config)
+            .map_err(|e| format!("Failed to serialize default config: {}", e))?;
+        
+        fs::write(&config_path, &content)
+            .map_err(|e| format!("Failed to create config file: {}", e))?;
+        
+        return Ok(content);
+    }
+    
+    fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config file: {}", e))
+}
+
+#[tauri::command]
+async fn get_router_config_path_command() -> Result<String, String> {
+    let config_path = get_router_config_path();
+    Ok(config_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn backup_router_config() -> Result<String, String> {
+    let config_path = get_router_config_path();
+    
+    if !config_path.exists() {
+        return Err("配置文件不存在".to_string());
+    }
+    
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config file: {}", e))?;
+    
+    // 创建备份文件名
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_filename = format!("claude_router_config_backup_{}.json", timestamp);
+    
+    // 获取备份目录
+    let backup_dir = if let Some(parent) = config_path.parent() {
+        parent.join("backups")
+    } else {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home_dir.join(".claude-code-router").join("backups")
+    };
+    
+    // 创建备份目录
+    fs::create_dir_all(&backup_dir)
+        .map_err(|e| format!("Failed to create backup directory: {}", e))?;
+    
+    let backup_path = backup_dir.join(&backup_filename);
+    
+    // 写入备份文件
+    fs::write(&backup_path, &content)
+        .map_err(|e| format!("Failed to create backup file: {}", e))?;
+    
+    Ok(backup_path.to_string_lossy().to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EnvironmentVariableData {
-    pub key: String,
-    pub value: String,
-    pub scope: String,
+pub struct RouterBackupFile {
+    pub filename: String,
+    pub path: String,
+    pub size: u64,
+    pub created_at: String,
 }
 
 #[tauri::command]
-async fn get_environment_variables_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<EnvironmentVariableData>>, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
-
-    let mut stmt = conn.prepare("SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables ORDER BY created_at DESC")
-        .map_err(|e| e.to_string())?;
+async fn get_router_backup_files() -> Result<Vec<RouterBackupFile>, String> {
+    let config_path = get_router_config_path();
+    let backup_dir = if let Some(parent) = config_path.parent() {
+        parent.join("backups")
+    } else {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home_dir.join(".claude-code-router").join("backups")
+    };
     
-    let env_vars = stmt.query_map([], |row| {
-        let id: String = row.get(0)?;
-        let name: String = row.get(1)?;
-        let key: String = row.get(2)?;
-        let value: String = row.get(3)?;
-        let scope: String = row.get(4)?;
-        let description: Option<String> = row.get(5)?;
-        let created_at: String = row.get(6)?;
-        let updated_at: String = row.get(7)?;
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let mut backup_files = Vec::new();
+    
+    for entry in fs::read_dir(&backup_dir).map_err(|e| format!("Failed to read backup directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
         
-        Ok(ConfigItem {
-            id,
-            name,
-            data: EnvironmentVariableData {
-                key,
-                value,
-                scope,
-            },
-            description,
-            created_at,
-            updated_at,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut result = Vec::new();
-    for env_var in env_vars {
-        result.push(env_var.map_err(|e| e.to_string())?);
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
+            if let Some(filename) = path.file_name().and_then(|name| name.to_str()) {
+                let metadata = entry.metadata().map_err(|e| format!("Failed to read file metadata: {}", e))?;
+                let size = metadata.len();
+                
+                // 从文件名中提取时间戳
+                let created_at = if let Some(timestamp_part) = filename.strip_prefix("claude_router_config_backup_").and_then(|s| s.strip_suffix(".json")) {
+                    // 解析时间戳格式: YYYYMMDD_HHMMSS
+                    if timestamp_part.len() == 15 {
+                        let year = &timestamp_part[0..4];
+                        let month = &timestamp_part[4..6];
+                        let day = &timestamp_part[6..8];
+                        let hour = &timestamp_part[9..11];
+                        let minute = &timestamp_part[11..13];
+                        let second = &timestamp_part[13..15];
+                        format!("{}-{}-{}T{}:{}:{}Z", year, month, day, hour, minute, second)
+                    } else {
+                        // 如果时间戳格式不对，使用文件修改时间
+                        metadata.modified()
+                            .ok()
+                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|duration| {
+                                chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                                    .unwrap_or_default()
+                                    .to_rfc3339()
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    }
+                } else {
+                    // 使用文件修改时间作为后备
+                    metadata.modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|duration| {
+                            chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                                .unwrap_or_default()
+                                .to_rfc3339()
+                        })
+                        .unwrap_or_else(|| "Unknown".to_string())
+                };
+                
+                backup_files.push(RouterBackupFile {
+                    filename: filename.to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    size,
+                    created_at,
+                });
+            }
+        }
     }
-
-    Ok(result)
+    
+    // 按创建时间降序排序（最新的在前面）
+    backup_files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    
+    Ok(backup_files)
 }
 
 #[tauri::command]
-async fn update_environment_variable(
-    app: tauri::AppHandle,
-    id: String,
-    request: UpdateEnvironmentVariableRequest,
-) -> Result<EnvironmentVariable, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
-
-    let existing_var: Option<EnvironmentVariable> = conn.query_row(
-        "SELECT id, name, key, value, scope, description, created_at, updated_at FROM environment_variables WHERE id = ?1",
-        [&id],
-        |row| {
-            Ok(EnvironmentVariable {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                key: row.get(2)?,
-                value: row.get(3)?,
-                scope: row.get(4)?,
-                description: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        },
-    ).optional().map_err(|e| e.to_string())?;
-
-    let mut env_var = existing_var.ok_or("Environment variable not found")?;
-
-    if let Some(name) = request.name {
-        env_var.name = name;
+async fn restore_router_config_from_file(backup_filename: String) -> Result<bool, String> {
+    let config_path = get_router_config_path();
+    let backup_dir = if let Some(parent) = config_path.parent() {
+        parent.join("backups")
+    } else {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home_dir.join(".claude-code-router").join("backups")
+    };
+    
+    let backup_file = backup_dir.join(&backup_filename);
+    
+    if !backup_file.exists() {
+        return Err("备份文件不存在".to_string());
     }
-    if let Some(key) = request.key {
-        env_var.key = key;
+    
+    // 读取备份内容
+    let content = fs::read_to_string(&backup_file)
+        .map_err(|e| format!("Failed to read backup file: {}", e))?;
+    
+    // 验证JSON格式
+    serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("备份文件格式无效: {}", e))?;
+    
+    // 创建配置目录（如果不存在）
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
     }
-    if let Some(value) = request.value {
-        env_var.value = value;
-    }
-    if let Some(scope) = request.scope {
-        env_var.scope = scope;
-    }
-    if let Some(description) = request.description {
-        env_var.description = Some(description);
-    }
-    env_var.updated_at = chrono::Utc::now().to_rfc3339();
-
-    conn.execute(
-        "UPDATE environment_variables SET name = ?1, key = ?2, value = ?3, scope = ?4, description = ?5, updated_at = ?6 WHERE id = ?7",
-        (&env_var.name, &env_var.key, &env_var.value, &env_var.scope, &env_var.description, &env_var.updated_at, &id),
-    ).map_err(|e| e.to_string())?;
-
-    Ok(env_var)
+    
+    // 恢复配置文件
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to restore config file: {}", e))?;
+    
+    Ok(true)
 }
 
 #[tauri::command]
-async fn delete_environment_variable(app: tauri::AppHandle, id: String) -> Result<bool, String> {
-    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+async fn get_router_backup_content(backup_filename: String) -> Result<String, String> {
+    let config_path = get_router_config_path();
+    let backup_dir = if let Some(parent) = config_path.parent() {
+        parent.join("backups")
+    } else {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home_dir.join(".claude-code-router").join("backups")
+    };
+    
+    let backup_file = backup_dir.join(&backup_filename);
+    
+    if !backup_file.exists() {
+        return Err("备份文件不存在".to_string());
+    }
+    
+    fs::read_to_string(&backup_file)
+        .map_err(|e| format!("Failed to read backup file: {}", e))
+}
 
-    let affected_rows = conn.execute(
-        "DELETE FROM environment_variables WHERE id = ?1",
-        [&id],
-    ).map_err(|e| e.to_string())?;
+#[tauri::command]
+async fn delete_router_backup(backup_filename: String) -> Result<bool, String> {
+    let config_path = get_router_config_path();
+    let backup_dir = if let Some(parent) = config_path.parent() {
+        parent.join("backups")
+    } else {
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        home_dir.join(".claude-code-router").join("backups")
+    };
+    
+    let backup_file = backup_dir.join(&backup_filename);
+    
+    if !backup_file.exists() {
+        return Ok(false);
+    }
+    
+    fs::remove_file(&backup_file)
+        .map_err(|e| format!("Failed to delete backup file: {}", e))?;
+    
+    Ok(true)
+}
 
-    Ok(affected_rows > 0)
+#[tauri::command]
+async fn select_router_config_path(app: tauri::AppHandle) -> Result<String, String> {
+    use tokio::sync::oneshot;
+    
+    let (tx, rx) = oneshot::channel();
+    
+    app.dialog().file()
+        .set_title("选择Claude Code Router配置文件路径")
+        .add_filter("JSON文件", &["json"])
+        .add_filter("所有文件", &["*"])
+        .pick_file(move |result| {
+            let _ = tx.send(result);
+        });
+    
+    match rx.await {
+        Ok(Some(path)) => {
+            let path_str = path.to_string();
+            
+            // 更新配置文件路径（这里可以保存到数据库或配置中）
+            // 暂时直接返回路径，实际使用中可能需要保存这个自定义路径
+            
+            Ok(path_str)
+        }
+        Ok(None) => {
+            Err("用户取消了选择".to_string())
+        }
+        Err(_) => {
+            Err("文件选择失败".to_string())
+        }
+    }
+}
+
+#[tauri::command]
+async fn save_raw_router_config(content: String) -> Result<bool, String> {
+    let config_path = get_router_config_path();
+    
+    // 验证JSON格式
+    serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("无效的JSON格式: {}", e))?;
+    
+    // 创建目录（如果不存在）
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+    
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to save config file: {}", e))?;
+    
+    Ok(true)
 }
 
 // Route Config CRUD operations
@@ -1467,6 +1686,130 @@ async fn delete_route_config(app: tauri::AppHandle, id: String) -> Result<bool, 
     Ok(affected_rows > 0)
 }
 
+// Feature Detection
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FeatureStatus {
+    pub feature_id: String,
+    pub is_installed: bool,
+    pub installation_path: Option<String>,
+    pub description: String,
+    pub can_install: bool,
+}
+
+#[tauri::command]
+async fn check_feature_status() -> Result<Vec<FeatureStatus>, String> {
+    let mut features = Vec::new();
+    
+    // Check Claude Code
+    let claude_path = dirs::home_dir()
+        .ok_or("Failed to get home directory")?
+        .join(".claude")
+        .join("settings.json");
+    
+    features.push(FeatureStatus {
+        feature_id: "claude-code".to_string(),
+        is_installed: claude_path.exists(),
+        installation_path: Some(claude_path.to_string_lossy().to_string()),
+        description: "Claude Code CLI tool configuration".to_string(),
+        can_install: true,
+    });
+    
+    // Check Claude Code Router
+    let router_path = dirs::home_dir()
+        .ok_or("Failed to get home directory")?
+        .join(".claude-code-router")
+        .join("config.json");
+    
+    features.push(FeatureStatus {
+        feature_id: "claude-router".to_string(),
+        is_installed: router_path.exists(),
+        installation_path: Some(router_path.to_string_lossy().to_string()),
+        description: "Claude Code Router configuration".to_string(),
+        can_install: true,
+    });
+    
+    Ok(features)
+}
+
+#[tauri::command]
+async fn install_feature(feature_id: String) -> Result<bool, String> {
+    match feature_id.as_str() {
+        "claude-code" => {
+            // Install Claude Code configuration
+            let claude_dir = dirs::home_dir()
+                .ok_or("Failed to get home directory")?
+                .join(".claude");
+            
+            let settings_file = claude_dir.join("settings.json");
+            
+            // Create directory if it doesn't exist
+            fs::create_dir_all(&claude_dir)
+                .map_err(|e| format!("Failed to create Claude directory: {}", e))?;
+            
+            // Create default settings file
+            let default_settings = serde_json::json!({
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.anthropic.com"
+                },
+                "permissions": {
+                    "allow": [],
+                    "deny": []
+                }
+            });
+            
+            let content = serde_json::to_string_pretty(&default_settings)
+                .map_err(|e| format!("Failed to serialize default settings: {}", e))?;
+            
+            fs::write(&settings_file, content)
+                .map_err(|e| format!("Failed to create settings file: {}", e))?;
+            
+            Ok(true)
+        }
+        "claude-router" => {
+            // Install Claude Code Router configuration
+            let router_dir = dirs::home_dir()
+                .ok_or("Failed to get home directory")?
+                .join(".claude-code-router");
+            
+            let config_file = router_dir.join("config.json");
+            
+            // Create directory if it doesn't exist
+            fs::create_dir_all(&router_dir)
+                .map_err(|e| format!("Failed to create router directory: {}", e))?;
+            
+            // Create default router configuration
+            let default_config = ClaudeCodeRouterConfig {
+                apikey: None,
+                proxy_url: None,
+                log: Some(false),
+                host: Some("localhost".to_string()),
+                non_interactive_mode: Some(false),
+                api_timeout_ms: Some(600000),
+                custom_router_path: None,
+                providers: vec![],
+                router: RouterConfig {
+                    default: None,
+                    background: None,
+                    think: None,
+                    long_context: None,
+                    long_context_threshold: Some(60000),
+                    web_search: None,
+                },
+                transformers: None,
+            };
+            
+            let content = serde_json::to_string_pretty(&default_config)
+                .map_err(|e| format!("Failed to serialize default config: {}", e))?;
+            
+            fs::write(&config_file, content)
+                .map_err(|e| format!("Failed to create config file: {}", e))?;
+            
+            Ok(true)
+        }
+        _ => Err(format!("Unknown feature: {}", feature_id))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1482,11 +1825,6 @@ pub fn run() {
             get_api_keys_config,
             update_api_key,
             delete_api_key,
-            create_environment_variable,
-            get_environment_variables,
-            get_environment_variables_config,
-            update_environment_variable,
-            delete_environment_variable,
             create_route_config,
             get_route_configs,
             get_route_configs_config,
@@ -1510,7 +1848,21 @@ pub fn run() {
             delete_config_path,
             save_config_path,
             get_config_path,
-            update_config_env
+            update_config_env,
+            get_router_config,
+            update_router_config,
+            create_router_config,
+            get_raw_router_config,
+            get_router_config_path_command,
+            backup_router_config,
+            get_router_backup_files,
+            restore_router_config_from_file,
+            get_router_backup_content,
+            delete_router_backup,
+            select_router_config_path,
+            save_raw_router_config,
+            check_feature_status,
+            install_feature
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

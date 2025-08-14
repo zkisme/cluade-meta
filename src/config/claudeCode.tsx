@@ -1,10 +1,11 @@
-import { Key } from "lucide-react";
+import { Key, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Edit, Trash2, Copy, Eye, EyeOff } from "lucide-react";
 import { ConfigType } from "@/types/config";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
+import { ClaudeCodeManager } from "@/components/ClaudeCodeManager";
 
 // 简化的全局重置机制
 let globalResetTrigger = 1; // 从1开始，避免与初始useState(0)冲突
@@ -21,7 +22,9 @@ const useGlobalReset = () => {
   useEffect(() => {
     const listener = () => setResetTrigger(globalResetTrigger);
     resetListeners.add(listener);
-    return () => resetListeners.delete(listener);
+    return () => {
+      resetListeners.delete(listener);
+    };
   }, []);
   
   return resetTrigger;
@@ -38,33 +41,40 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
   displayName: "Claude Code API密钥",
   description: "管理Claude Code的API密钥配置",
   icon: Key,
+  customPageComponent: ClaudeCodeManager,
   defaultData: {
     ANTHROPIC_AUTH_TOKEN: "",
     ANTHROPIC_BASE_URL: "https://api.anthropic.com",
   },
   formComponent: ({ data, onChange }) => (
-    <div className="space-y-4">
-      <div>
-        <label className="text-sm font-medium">ANTHROPIC_AUTH_TOKEN</label>
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+          <Key className="h-3.5 w-3.5 text-primary" />
+          ANTHROPIC_AUTH_TOKEN
+        </label>
         <input
           type="password"
           value={data.ANTHROPIC_AUTH_TOKEN}
           onChange={(e) => onChange({ ...data, ANTHROPIC_AUTH_TOKEN: e.target.value })}
-          className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background font-mono text-sm"
           placeholder="请输入API密钥"
         />
       </div>
-      <div>
-        <label className="text-sm font-medium">ANTHROPIC_BASE_URL</label>
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+          <Globe className="h-3.5 w-3.5 text-primary" />
+          ANTHROPIC_BASE_URL
+        </label>
         <input
           type="text"
           value={data.ANTHROPIC_BASE_URL || ""}
           onChange={(e) => onChange({ ...data, ANTHROPIC_BASE_URL: e.target.value })}
-          className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background text-sm"
           placeholder="https://api.anthropic.com"
         />
       </div>
-          </div>
+    </div>
   ),
   listComponent: ({ item, isActive, onToggleActive, onEdit, onDelete }) => {
     const [showKey, setShowKey] = useState(false);

@@ -38,6 +38,8 @@ export interface ConfigType<T = any> {
     onEdit: (item: ConfigItem<T>) => void;
     onDelete: (id: string) => void;
   }>;
+  // 自定义页面组件，用于复杂配置管理
+  customPageComponent?: React.ComponentType<any>;
   apiEndpoints: {
     create: string;
     list: string;

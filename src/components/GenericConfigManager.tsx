@@ -35,7 +35,7 @@ interface GenericConfigManagerProps<T = any> {
 }
 
 export const GenericConfigManager = forwardRef<any, GenericConfigManagerProps>(
-  ({ configType }, ref) => {
+  ({ configType, onOpenCreateDialog }, ref) => {
     const {
       items,
       loading,
@@ -73,7 +73,7 @@ export const GenericConfigManager = forwardRef<any, GenericConfigManagerProps>(
 
     // Load items when component mounts
     useImperativeHandle(ref, () => ({
-      onOpenCreateDialog: openCreateDialog,
+      onOpenCreateDialog: onOpenCreateDialog || openCreateDialog,
       onViewConfig: handleViewConfig,
       onBackup: handleBackup,
       onRestore: handleRestore,
