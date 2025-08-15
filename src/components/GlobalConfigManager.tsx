@@ -85,12 +85,12 @@ export function GlobalConfigManager({ config, onChange }: GlobalConfigManagerPro
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="apikey">API密钥</Label>
+              <Label htmlFor="apikey">API密钥 (ANTHROPIC_API_KEY)</Label>
               <Input
                 id="apikey"
                 type="password"
-                value={formData.APIKEY || ''}
-                onChange={(e) => setFormData({ ...formData, APIKEY: e.target.value })}
+                value={formData.ANTHROPIC_API_KEY || ''}
+                onChange={(e) => setFormData({ ...formData, ANTHROPIC_API_KEY: e.target.value })}
                 placeholder="your-secret-key"
               />
               <p className="text-xs text-muted-foreground">
@@ -253,7 +253,7 @@ export function GlobalConfigManager({ config, onChange }: GlobalConfigManagerPro
               <pre className="text-sm overflow-x-auto">
                 <code>
                   {JSON.stringify({
-                    APIKEY: formData.APIKEY ? '***' : undefined,
+                    ANTHROPIC_API_KEY: formData.ANTHROPIC_API_KEY ? '***' : undefined,
                     PROXY_URL: formData.PROXY_URL,
                     LOG: formData.LOG,
                     HOST: formData.HOST,

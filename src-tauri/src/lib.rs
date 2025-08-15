@@ -46,8 +46,8 @@ pub struct CustomTransformer {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeCodeRouterConfig {
-    #[serde(rename = "APIKEY", skip_serializing_if = "Option::is_none")]
-    pub apikey: Option<String>,
+    #[serde(rename = "ANTHROPIC_API_KEY", skip_serializing_if = "Option::is_none")]
+    pub anthropic_api_key: Option<String>,
     #[serde(rename = "PROXY_URL", skip_serializing_if = "Option::is_none")]
     pub proxy_url: Option<String>,
     #[serde(rename = "LOG", skip_serializing_if = "Option::is_none")]
@@ -71,7 +71,7 @@ pub struct ClaudeCodeRouterConfig {
 pub struct ApiKey {
     pub id: String,
     pub name: String,
-    pub ANTHROPIC_AUTH_TOKEN: String,
+    pub ANTHROPIC_API_KEY: String,
     pub description: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
     pub created_at: String,
@@ -127,7 +127,7 @@ pub struct UpdateRouteConfigRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    pub ANTHROPIC_AUTH_TOKEN: String,
+    pub ANTHROPIC_API_KEY: String,
     pub description: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
 }
@@ -135,14 +135,14 @@ pub struct CreateApiKeyRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
-    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_API_KEY: Option<String>,
     pub description: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeSettings {
-    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_API_KEY: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
@@ -157,7 +157,7 @@ pub struct ClaudeSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnvConfig {
-    pub ANTHROPIC_AUTH_TOKEN: Option<String>,
+    pub ANTHROPIC_API_KEY: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
@@ -211,7 +211,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS api_keys (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            ANTHROPIC_AUTH_TOKEN TEXT NOT NULL,
+            ANTHROPIC_API_KEY TEXT NOT NULL,
             description TEXT,
             ANTHROPIC_BASE_URL TEXT,
             created_at TEXT NOT NULL,
@@ -220,7 +220,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         (),
     )?;
 
-    // Check if we need to migrate from old schema (key column to ANTHROPIC_AUTH_TOKEN)
+    // Check if we need to migrate from old schema (key column to ANTHROPIC_API_KEY)
     let has_key_column: Result<bool> = conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'key'",
         [],
@@ -228,16 +228,16 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
     );
 
     if let Ok(true) = has_key_column {
-        // Migration needed: rename key column to ANTHROPIC_AUTH_TOKEN
+        // Migration needed: rename key column to ANTHROPIC_API_KEY
         conn.execute(
-            "ALTER TABLE api_keys RENAME COLUMN key TO ANTHROPIC_AUTH_TOKEN",
+            "ALTER TABLE api_keys RENAME COLUMN key TO ANTHROPIC_API_KEY",
             (),
         ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
     }
 
     // Check if we need to migrate from lowercase to uppercase column names
     let has_lowercase_columns: Result<i64> = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name IN ('anthropic_auth_token', 'anthropic_base_url')",
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name IN ('anthropic_api_key', 'anthropic_base_url')",
         [],
         |row| row.get(0),
     );
@@ -247,7 +247,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             // Migration needed: rename lowercase columns to uppercase
             if count >= 1 {
                 conn.execute(
-                    "ALTER TABLE api_keys RENAME COLUMN anthropic_auth_token TO ANTHROPIC_AUTH_TOKEN",
+                    "ALTER TABLE api_keys RENAME COLUMN anthropic_api_key TO ANTHROPIC_API_KEY",
                     (),
                 ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
             }
@@ -258,6 +258,21 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
                 ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
             }
         }
+    }
+
+    // Check if we need to migrate from ANTHROPIC_AUTH_TOKEN to ANTHROPIC_API_KEY
+    let has_auth_token_column: Result<bool> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'ANTHROPIC_AUTH_TOKEN'",
+        [],
+        |row| row.get(0),
+    );
+
+    if let Ok(true) = has_auth_token_column {
+        // Migration needed: rename ANTHROPIC_AUTH_TOKEN column to ANTHROPIC_API_KEY
+        conn.execute(
+            "ALTER TABLE api_keys RENAME COLUMN ANTHROPIC_AUTH_TOKEN TO ANTHROPIC_API_KEY",
+            (),
+        ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema from ANTHROPIC_AUTH_TOKEN to ANTHROPIC_API_KEY: {}", e), rusqlite::types::Type::Null))?;
     }
 
     // Check if CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC column exists and remove it
@@ -291,6 +306,16 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
     // Create the current_config_path table if it doesn't exist
     conn.execute(
         "CREATE TABLE IF NOT EXISTS current_config_path (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+
+    // Create the current_router_config_path table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS current_router_config_path (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             path TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -346,7 +371,7 @@ async fn create_api_key(
     let api_key = ApiKey {
         id: uuid::Uuid::new_v4().to_string(),
         name: request.name,
-        ANTHROPIC_AUTH_TOKEN: request.ANTHROPIC_AUTH_TOKEN,
+        ANTHROPIC_API_KEY: request.ANTHROPIC_API_KEY,
         description: request.description,
         ANTHROPIC_BASE_URL: request.ANTHROPIC_BASE_URL,
         created_at: now.clone(),
@@ -354,8 +379,8 @@ async fn create_api_key(
     };
 
     conn.execute(
-        "INSERT INTO api_keys (id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        (&api_key.id, &api_key.name, &api_key.ANTHROPIC_AUTH_TOKEN, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.created_at, &api_key.updated_at),
+        "INSERT INTO api_keys (id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        (&api_key.id, &api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.created_at, &api_key.updated_at),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -365,14 +390,14 @@ async fn create_api_key(
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
         Ok(ApiKey {
             id: row.get(0)?,
             name: row.get(1)?,
-            ANTHROPIC_AUTH_TOKEN: row.get(2)?,
+            ANTHROPIC_API_KEY: row.get(2)?,
             description: row.get(3)?,
             ANTHROPIC_BASE_URL: row.get(4)?,
             created_at: row.get(5)?,
@@ -400,7 +425,7 @@ pub struct ConfigItem<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiKeyData {
-    pub ANTHROPIC_AUTH_TOKEN: String,
+    pub ANTHROPIC_API_KEY: String,
     pub ANTHROPIC_BASE_URL: Option<String>,
 }
 
@@ -408,13 +433,13 @@ pub struct ApiKeyData {
 async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<ApiKeyData>>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
         let id: String = row.get(0)?;
         let name: String = row.get(1)?;
-        let ANTHROPIC_AUTH_TOKEN: String = row.get(2)?;
+        let ANTHROPIC_API_KEY: String = row.get(2)?;
         let description: Option<String> = row.get(3)?;
         let ANTHROPIC_BASE_URL: Option<String> = row.get(4)?;
         let created_at: String = row.get(5)?;
@@ -424,7 +449,7 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
             id,
             name,
             data: ApiKeyData {
-                ANTHROPIC_AUTH_TOKEN,
+                ANTHROPIC_API_KEY,
                 ANTHROPIC_BASE_URL,
             },
             description,
@@ -451,13 +476,13 @@ async fn update_api_key(
 
     // Check if the API key exists
     let existing_key: Option<ApiKey> = conn.query_row(
-        "SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys WHERE id = ?1",
+        "SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys WHERE id = ?1",
         [&id],
         |row| {
             Ok(ApiKey {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                ANTHROPIC_AUTH_TOKEN: row.get(2)?,
+                ANTHROPIC_API_KEY: row.get(2)?,
                 description: row.get(3)?,
                 ANTHROPIC_BASE_URL: row.get(4)?,
                 created_at: row.get(5)?,
@@ -471,8 +496,8 @@ async fn update_api_key(
     if let Some(name) = request.name {
         api_key.name = name;
     }
-    if let Some(ANTHROPIC_AUTH_TOKEN) = request.ANTHROPIC_AUTH_TOKEN {
-        api_key.ANTHROPIC_AUTH_TOKEN = ANTHROPIC_AUTH_TOKEN;
+    if let Some(ANTHROPIC_API_KEY) = request.ANTHROPIC_API_KEY {
+        api_key.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
     }
     if let Some(description) = request.description {
         api_key.description = Some(description);
@@ -483,8 +508,8 @@ async fn update_api_key(
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE api_keys SET name = ?1, ANTHROPIC_AUTH_TOKEN = ?2, description = ?3, ANTHROPIC_BASE_URL = ?4, updated_at = ?5 WHERE id = ?6",
-        (&api_key.name, &api_key.ANTHROPIC_AUTH_TOKEN, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.updated_at, &id),
+        "UPDATE api_keys SET name = ?1, ANTHROPIC_API_KEY = ?2, description = ?3, ANTHROPIC_BASE_URL = ?4, updated_at = ?5 WHERE id = ?6",
+        (&api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.updated_at, &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -621,7 +646,7 @@ async fn get_claude_settings(path: String) -> Result<String, String> {
         
         // Create default settings
         let default_settings = ClaudeSettings {
-            ANTHROPIC_AUTH_TOKEN: None,
+            ANTHROPIC_API_KEY: None,
             ANTHROPIC_BASE_URL: Some("https://api.anthropic.com".to_string()),
             model: Some("claude-3-5-sonnet-20241022".to_string()),
             max_tokens: Some(4096),
@@ -1047,6 +1072,7 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
     // Template configuration structure
     let template_config = serde_json::json!({
         "env": {
+            "ANTHROPIC_API_KEY": "",
             "ANTHROPIC_AUTH_TOKEN": "",
             "ANTHROPIC_BASE_URL": "https://api.packycode.com",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1
@@ -1079,21 +1105,43 @@ async fn update_config_env(config_path: String, api_key: String, base_url: Optio
     // Update only specific fields while preserving the structure
     if let Some(env_obj) = config_obj.get_mut("env") {
         if let Some(env_map) = env_obj.as_object_mut() {
-            // Update ANTHROPIC_AUTH_TOKEN
+            // Update both ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN fields
             if api_key.is_empty() {
+                env_map.remove("ANTHROPIC_API_KEY");
                 env_map.remove("ANTHROPIC_AUTH_TOKEN");
             } else {
+                env_map.insert("ANTHROPIC_API_KEY".to_string(), serde_json::Value::String(api_key.clone()));
                 env_map.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(api_key.clone()));
             }
             
             // Update ANTHROPIC_BASE_URL if provided
             if let Some(url) = base_url {
-                env_map.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(url));
+                if !url.is_empty() {
+                    env_map.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(url));
+                }
             }
             
             // Always ensure CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set to 1
             env_map.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), serde_json::Value::Number(serde_json::Number::from(1)));
         }
+    } else {
+        // If env doesn't exist, create it
+        let mut env_map = serde_json::Map::new();
+        
+        if !api_key.is_empty() {
+            env_map.insert("ANTHROPIC_API_KEY".to_string(), serde_json::Value::String(api_key.clone()));
+            env_map.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(api_key.clone()));
+        }
+        
+        if let Some(url) = base_url.as_ref() {
+            if !url.is_empty() {
+                env_map.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(url.clone()));
+            }
+        }
+        
+        env_map.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), serde_json::Value::Number(serde_json::Number::from(1)));
+        
+        config_obj.as_object_mut().unwrap().insert("env".to_string(), serde_json::Value::Object(env_map));
     }
     
     // Update apiKeyHelper to match the API key and clean up old field
@@ -1139,14 +1187,33 @@ fn get_router_config_path() -> std::path::PathBuf {
     home_dir.join(".claude-code-router").join("config.json")
 }
 
+// 获取router配置文件路径（支持自定义路径）
+async fn get_router_config_path_with_custom(app: Option<&tauri::AppHandle>) -> std::path::PathBuf {
+    if let Some(app_handle) = app {
+        // 尝试从数据库获取自定义路径
+        if let Ok(conn) = get_database_connection(app_handle) {
+            if let Ok(custom_path) = conn.query_row(
+                "SELECT path FROM current_router_config_path ORDER BY updated_at DESC LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            ) {
+                return std::path::PathBuf::from(custom_path);
+            }
+        }
+    }
+    
+    // 如果没有自定义路径，使用默认路径
+    get_router_config_path()
+}
+
 #[tauri::command]
-async fn get_router_config() -> Result<ClaudeCodeRouterConfig, String> {
-    let config_path = get_router_config_path();
+async fn get_router_config(app: tauri::AppHandle) -> Result<ClaudeCodeRouterConfig, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     
     if !config_path.exists() {
         // 返回默认配置
         return Ok(ClaudeCodeRouterConfig {
-            apikey: None,
+            anthropic_api_key: None,
             proxy_url: None,
             log: None,
             host: None,
@@ -1174,8 +1241,8 @@ async fn get_router_config() -> Result<ClaudeCodeRouterConfig, String> {
 }
 
 #[tauri::command] 
-async fn update_router_config(config: ClaudeCodeRouterConfig) -> Result<bool, String> {
-    let config_path = get_router_config_path();
+async fn update_router_config(app: tauri::AppHandle, config: ClaudeCodeRouterConfig) -> Result<bool, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     
     // 创建目录（如果不存在）
     if let Some(parent) = config_path.parent() {
@@ -1193,14 +1260,14 @@ async fn update_router_config(config: ClaudeCodeRouterConfig) -> Result<bool, St
 }
 
 #[tauri::command]
-async fn create_router_config(config: ClaudeCodeRouterConfig) -> Result<ClaudeCodeRouterConfig, String> {
-    update_router_config(config.clone()).await?;
+async fn create_router_config(app: tauri::AppHandle, config: ClaudeCodeRouterConfig) -> Result<ClaudeCodeRouterConfig, String> {
+    update_router_config(app, config.clone()).await?;
     Ok(config)
 }
 
 #[tauri::command]
-async fn get_raw_router_config() -> Result<String, String> {
-    let config_path = get_router_config_path();
+async fn get_raw_router_config(app: tauri::AppHandle) -> Result<String, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     
     if !config_path.exists() {
         // 创建默认配置文件
@@ -1210,7 +1277,7 @@ async fn get_raw_router_config() -> Result<String, String> {
         }
         
         let default_config = ClaudeCodeRouterConfig {
-            apikey: None,
+            anthropic_api_key: None,
             proxy_url: None,
             log: None,
             host: None,
@@ -1243,14 +1310,14 @@ async fn get_raw_router_config() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn get_router_config_path_command() -> Result<String, String> {
-    let config_path = get_router_config_path();
+async fn get_router_config_path_command(app: tauri::AppHandle) -> Result<String, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     Ok(config_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-async fn backup_router_config() -> Result<String, String> {
-    let config_path = get_router_config_path();
+async fn backup_router_config(app: tauri::AppHandle) -> Result<String, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     
     if !config_path.exists() {
         return Err("配置文件不存在".to_string());
@@ -1293,8 +1360,8 @@ pub struct RouterBackupFile {
 }
 
 #[tauri::command]
-async fn get_router_backup_files() -> Result<Vec<RouterBackupFile>, String> {
-    let config_path = get_router_config_path();
+async fn get_router_backup_files(app: tauri::AppHandle) -> Result<Vec<RouterBackupFile>, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     let backup_dir = if let Some(parent) = config_path.parent() {
         parent.join("backups")
     } else {
@@ -1370,8 +1437,8 @@ async fn get_router_backup_files() -> Result<Vec<RouterBackupFile>, String> {
 }
 
 #[tauri::command]
-async fn restore_router_config_from_file(backup_filename: String) -> Result<bool, String> {
-    let config_path = get_router_config_path();
+async fn restore_router_config_from_file(app: tauri::AppHandle, backup_filename: String) -> Result<bool, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     let backup_dir = if let Some(parent) = config_path.parent() {
         parent.join("backups")
     } else {
@@ -1407,8 +1474,8 @@ async fn restore_router_config_from_file(backup_filename: String) -> Result<bool
 }
 
 #[tauri::command]
-async fn get_router_backup_content(backup_filename: String) -> Result<String, String> {
-    let config_path = get_router_config_path();
+async fn get_router_backup_content(app: tauri::AppHandle, backup_filename: String) -> Result<String, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     let backup_dir = if let Some(parent) = config_path.parent() {
         parent.join("backups")
     } else {
@@ -1427,8 +1494,8 @@ async fn get_router_backup_content(backup_filename: String) -> Result<String, St
 }
 
 #[tauri::command]
-async fn delete_router_backup(backup_filename: String) -> Result<bool, String> {
-    let config_path = get_router_config_path();
+async fn delete_router_backup(app: tauri::AppHandle, backup_filename: String) -> Result<bool, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     let backup_dir = if let Some(parent) = config_path.parent() {
         parent.join("backups")
     } else {
@@ -1466,8 +1533,19 @@ async fn select_router_config_path(app: tauri::AppHandle) -> Result<String, Stri
         Ok(Some(path)) => {
             let path_str = path.to_string();
             
-            // 更新配置文件路径（这里可以保存到数据库或配置中）
-            // 暂时直接返回路径，实际使用中可能需要保存这个自定义路径
+            // 保存配置文件路径到数据库
+            let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+            let now = chrono::Utc::now().to_rfc3339();
+            
+            // 删除现有的router配置路径
+            conn.execute("DELETE FROM current_router_config_path", ())
+                .map_err(|e| e.to_string())?;
+            
+            // 插入新的router配置路径
+            conn.execute(
+                "INSERT INTO current_router_config_path (path, updated_at) VALUES (?1, ?2)",
+                (&path_str, &now),
+            ).map_err(|e| e.to_string())?;
             
             Ok(path_str)
         }
@@ -1481,8 +1559,8 @@ async fn select_router_config_path(app: tauri::AppHandle) -> Result<String, Stri
 }
 
 #[tauri::command]
-async fn save_raw_router_config(content: String) -> Result<bool, String> {
-    let config_path = get_router_config_path();
+async fn save_raw_router_config(app: tauri::AppHandle, content: String) -> Result<bool, String> {
+    let config_path = get_router_config_path_with_custom(Some(&app)).await;
     
     // 验证JSON格式
     serde_json::from_str::<serde_json::Value>(&content)
@@ -1779,7 +1857,7 @@ async fn install_feature(feature_id: String) -> Result<bool, String> {
             
             // Create default router configuration
             let default_config = ClaudeCodeRouterConfig {
-                apikey: None,
+                anthropic_api_key: None,
                 proxy_url: None,
                 log: Some(false),
                 host: Some("localhost".to_string()),

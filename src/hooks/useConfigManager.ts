@@ -46,7 +46,7 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
     try {
       console.log('Starting syncActiveConfigWithFile...');
       console.log('Current activeItemId:', activeItemId);
-      console.log('Config items:', configItems.map((item: any) => ({ id: item.id, name: item.name, key: item.data.ANTHROPIC_AUTH_TOKEN?.slice(0, 10) + '...' })));
+      console.log('Config items:', configItems.map((item: any) => ({ id: item.id, name: item.name, key: item.data.ANTHROPIC_API_KEY?.slice(0, 10) + '...' })));
       
       // 读取实际配置文件内容
       const configPath = await invokeTauri<string>('get_config_path');
@@ -54,6 +54,11 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       
       const fileContent = await invokeTauri<string>('read_config_file', { configPath });
       console.log('File content length:', fileContent.length);
+      
+      if (!fileContent || fileContent.trim() === '') {
+        console.log('Config file is empty or not found');
+        return;
+      }
       
       const configData = JSON.parse(fileContent);
       console.log('Parsed config data keys:', Object.keys(configData));
@@ -63,18 +68,18 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       let actualApiKey = null;
       
       // 检查根级别
-      if (configData.ANTHROPIC_AUTH_TOKEN) {
-        actualApiKey = configData.ANTHROPIC_AUTH_TOKEN;
+      if (configData.ANTHROPIC_API_KEY) {
+        actualApiKey = configData.ANTHROPIC_API_KEY;
         console.log('Found API key at root level');
       }
       // 检查env对象中
-      else if (configData.env && configData.env.ANTHROPIC_AUTH_TOKEN) {
-        actualApiKey = configData.env.ANTHROPIC_AUTH_TOKEN;
+      else if (configData.env && configData.env.ANTHROPIC_API_KEY) {
+        actualApiKey = configData.env.ANTHROPIC_API_KEY;
         console.log('Found API key in env object');
       }
       // 检查其他可能的位置
-      else if (configData.apiKeyHelper && configData.apiKeyHelper.ANTHROPIC_AUTH_TOKEN) {
-        actualApiKey = configData.apiKeyHelper.ANTHROPIC_AUTH_TOKEN;
+      else if (configData.apiKeyHelper && configData.apiKeyHelper.ANTHROPIC_API_KEY) {
+        actualApiKey = configData.apiKeyHelper.ANTHROPIC_API_KEY;
         console.log('Found API key in apiKeyHelper object');
       }
       
@@ -82,7 +87,7 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       
       if (actualApiKey) {
         const matchingItem = configItems.find((item: any) => 
-          item.data.ANTHROPIC_AUTH_TOKEN === actualApiKey
+          item.data.ANTHROPIC_API_KEY === actualApiKey
         );
         
         console.log('Matching item found:', matchingItem ? { id: matchingItem.id, name: matchingItem.name } : 'none');
@@ -95,7 +100,7 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
           console.log('No sync needed - either no match or already correct');
         }
       } else {
-        console.log('No ANTHROPIC_AUTH_TOKEN found in config file');
+        console.log('No ANTHROPIC_API_KEY found in config file');
       }
     } catch (error) {
       console.warn('Failed to sync active config with file:', error);
@@ -161,8 +166,8 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       console.log(`Loaded ${result.length} ${configType.name} items`);
       setItems(result);
       
-      // 如果是Claude Code配置，重置密钥显示状态
-      if (configType.id === 'claude-code') {
+      // 如果是Claude Code配置，重置密钥显示状态 - 但只在首次加载时，不是在编辑更新后
+      if (configType.id === 'claude-code' && !window.__claudeCodeEditingInProgress) {
         try {
           const { resetAllKeyVisibility } = await import('@/config/claudeCode');
           resetAllKeyVisibility();
@@ -195,7 +200,20 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
 
   const handleCreate = async (request: CreateConfigRequest<T>) => {
     try {
-      const result = await invokeTauri<ConfigItem<T>>(configType.apiEndpoints.create, { request });
+      // Transform request for claude-code to flatten the data structure
+      let transformedRequest = request;
+      if (configType.id === 'claude-code' && request.data) {
+        const apiKeyData = request.data as any;
+        transformedRequest = {
+          name: request.name,
+          description: request.description,
+          ANTHROPIC_API_KEY: apiKeyData.ANTHROPIC_API_KEY,
+          ANTHROPIC_BASE_URL: apiKeyData.ANTHROPIC_BASE_URL || undefined, // Convert empty string to undefined
+        } as any;
+        console.log('Transformed claude-code create request:', transformedRequest);
+      }
+      
+      const result = await invokeTauri<ConfigItem<T>>(configType.apiEndpoints.create, { request: transformedRequest });
       setItems(prev => [result, ...prev]);
       setIsFormDialogOpen(false);
       setEditingItem(null);
@@ -230,10 +248,42 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
 
   const handleUpdate = async (id: string, request: UpdateConfigRequest<T>) => {
     try {
-      const result = await invokeTauri<ConfigItem<T>>(configType.apiEndpoints.update, { id, request });
+      console.log('handleUpdate called with:', { id, request });
+      
+      // Set editing flag to prevent key visibility reset
+      if (configType.id === 'claude-code') {
+        (window as any).__claudeCodeEditingInProgress = true;
+      }
+      
+      // Transform request for claude-code to flatten the data structure
+      let transformedRequest = request;
+      if (configType.id === 'claude-code' && request.data) {
+        const apiKeyData = request.data as any;
+        transformedRequest = {
+          name: request.name,
+          description: request.description,
+          ANTHROPIC_API_KEY: apiKeyData.ANTHROPIC_API_KEY,
+          ANTHROPIC_BASE_URL: apiKeyData.ANTHROPIC_BASE_URL || undefined, // Convert empty string to undefined
+        } as any;
+        console.log('Transformed claude-code request:', transformedRequest);
+      }
+      
+      const result = await invokeTauri<ConfigItem<T>>(configType.apiEndpoints.update, { id, request: transformedRequest });
+      console.log('handleUpdate received result:', result);
+      
+      // Update items immediately with the new data
       setItems(prev => prev.map(item => item.id === id ? result : item));
       setIsFormDialogOpen(false);
       setEditingItem(null);
+      
+      // Force refresh the items list to ensure UI consistency
+      setTimeout(() => {
+        loadItems();
+        // Clear editing flag after load
+        if (configType.id === 'claude-code') {
+          (window as any).__claudeCodeEditingInProgress = false;
+        }
+      }, 100);
       
       // If config type has onConfigUpdate, call it with the updated item's data
       if (configType.onConfigUpdate) {
@@ -250,11 +300,18 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
             toast.error("更新配置文件失败");
           }
         }
+      } else {
+        // If no config update callback, still show success message for the database update
+        toast.success(`${configType.displayName}更新成功`);
       }
-      
-      toast.success(`${configType.displayName}更新成功`);
     } catch (error) {
       console.error(`Failed to update ${configType.name}:`, error);
+      
+      // Clear editing flag on error
+      if (configType.id === 'claude-code') {
+        (window as any).__claudeCodeEditingInProgress = false;
+      }
+      
       if (error instanceof Error && error.message === 'Tauri environment not available') {
         toast.error(`浏览器环境4：无法更新${configType.displayName}`);
       } else {

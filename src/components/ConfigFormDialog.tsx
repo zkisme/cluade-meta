@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfigItem, CreateConfigRequest, UpdateConfigRequest, ConfigType } from "@/types/config";
@@ -21,6 +21,19 @@ export function ConfigFormDialog<T = any>({
   const [formData, setFormData] = useState<T>(editingItem?.data || configType.defaultData);
   const [name, setName] = useState(editingItem?.name || "");
   const [description, setDescription] = useState(editingItem?.description || "");
+
+  // 当editingItem改变时，更新表单数据
+  useEffect(() => {
+    if (editingItem) {
+      setFormData(editingItem.data);
+      setName(editingItem.name);
+      setDescription(editingItem.description || "");
+    } else {
+      setFormData(configType.defaultData);
+      setName("");
+      setDescription("");
+    }
+  }, [editingItem, configType.defaultData]);
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -47,9 +60,7 @@ export function ConfigFormDialog<T = any>({
 
   const handleClose = () => {
     onOpenChange(false);
-    setFormData(configType.defaultData);
-    setName("");
-    setDescription("");
+    // 状态重置由useEffect处理，当editingItem变为null时会自动重置
   };
 
   return (

@@ -31,7 +31,7 @@ export interface CustomTransformer {
 
 export interface ClaudeCodeRouterConfig {
   // 全局配置
-  APIKEY?: string;
+  ANTHROPIC_API_KEY?: string;
   PROXY_URL?: string;
   LOG?: boolean;
   HOST?: string;

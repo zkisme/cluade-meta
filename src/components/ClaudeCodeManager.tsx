@@ -132,6 +132,7 @@ export const ClaudeCodeManager = forwardRef<any, ClaudeCodeManagerProps>(({ onOp
       const path = await invoke<string>('open_file_dialog');
       if (path) {
         await invoke('save_config_path', { path });
+        setConfigPath(path); // 更新本地状态
         toast.success(`配置文件路径已更新: ${path}`);
       }
     } catch (error) {

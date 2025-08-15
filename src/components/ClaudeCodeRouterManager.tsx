@@ -194,6 +194,7 @@ export function ClaudeCodeRouterManager() {
     try {
       const path = await invoke<string>('select_router_config_path');
       if (path) {
+        setConfigPath(path); // 更新本地状态
         await loadConfig();
         toast.success(`配置文件路径已更新: ${path}`);
       }

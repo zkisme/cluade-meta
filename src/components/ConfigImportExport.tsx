@@ -42,7 +42,7 @@ export function ConfigImportExport({ config, onImport }: ConfigImportExportProps
     const exportData = {
       ...config,
       // 隐藏敏感信息
-      APIKEY: config.APIKEY ? '***HIDDEN***' : undefined,
+      ANTHROPIC_API_KEY: config.ANTHROPIC_API_KEY ? '***HIDDEN***' : undefined,
       Providers: config.Providers?.map(provider => ({
         ...provider,
         api_key: '***HIDDEN***'
@@ -98,7 +98,7 @@ export function ConfigImportExport({ config, onImport }: ConfigImportExportProps
   // 加载示例配置
   const loadExample = () => {
     const exampleConfig: ClaudeCodeRouterConfig = {
-      APIKEY: 'your-secret-key',
+      ANTHROPIC_API_KEY: 'your-secret-key',
       PROXY_URL: 'http://127.0.0.1:7890',
       LOG: true,
       API_TIMEOUT_MS: 600000,

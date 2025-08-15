@@ -31,7 +31,7 @@ const useGlobalReset = () => {
 };
 
 export interface ApiKeyData {
-  ANTHROPIC_AUTH_TOKEN: string;
+  ANTHROPIC_API_KEY: string;
   ANTHROPIC_BASE_URL?: string;
 }
 
@@ -43,39 +43,91 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
   icon: Key,
   customPageComponent: ClaudeCodeManager,
   defaultData: {
-    ANTHROPIC_AUTH_TOKEN: "",
+    ANTHROPIC_API_KEY: "",
     ANTHROPIC_BASE_URL: "https://api.anthropic.com",
   },
-  formComponent: ({ data, onChange }) => (
+  formComponent: ({ data, onChange }) => {
+    const [showPassword, setShowPassword] = useState(false);
+    
+    // Debug: 检查传入的数据
+    console.log('formComponent received data:', data);
+    
+    const copyToClipboard = (text: string) => {
+      navigator.clipboard.writeText(text);
+      toast.success('已复制到剪贴板');
+    };
+
+    return (
     <div className="space-y-3">
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-foreground flex items-center gap-2">
           <Key className="h-3.5 w-3.5 text-primary" />
-          ANTHROPIC_AUTH_TOKEN
+          ANTHROPIC_API_KEY
         </label>
-        <input
-          type="password"
-          value={data.ANTHROPIC_AUTH_TOKEN}
-          onChange={(e) => onChange({ ...data, ANTHROPIC_AUTH_TOKEN: e.target.value })}
-          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background font-mono text-sm"
-          placeholder="请输入API密钥"
-        />
+        <div className="relative">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={data?.ANTHROPIC_API_KEY || ""}
+            onChange={(e) => onChange({ ...data, ANTHROPIC_API_KEY: e.target.value })}
+            className="w-full px-3 py-2 pr-20 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background font-mono text-sm"
+            placeholder="请输入API密钥"
+          />
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowPassword(!showPassword)}
+              className="h-6 w-6 p-0 hover:bg-muted"
+              title={showPassword ? "隐藏密钥" : "显示密钥"}
+            >
+              {showPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(data?.ANTHROPIC_API_KEY || "")}
+              className="h-6 w-6 p-0 hover:bg-muted"
+              title="复制API密钥"
+              disabled={!data?.ANTHROPIC_API_KEY}
+            >
+              <Copy className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
       </div>
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-foreground flex items-center gap-2">
           <Globe className="h-3.5 w-3.5 text-primary" />
           ANTHROPIC_BASE_URL
         </label>
-        <input
-          type="text"
-          value={data.ANTHROPIC_BASE_URL || ""}
-          onChange={(e) => onChange({ ...data, ANTHROPIC_BASE_URL: e.target.value })}
-          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background text-sm"
-          placeholder="https://api.anthropic.com"
-        />
+        <div className="relative">
+          <input
+            type="text"
+            value={data?.ANTHROPIC_BASE_URL || ""}
+            onChange={(e) => onChange({ ...data, ANTHROPIC_BASE_URL: e.target.value })}
+            className="w-full px-3 py-2 pr-10 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 bg-background text-sm"
+            placeholder="https://api.anthropic.com"
+          />
+          <div className="absolute right-1 top-1/2 -translate-y-1/2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(data?.ANTHROPIC_BASE_URL || "")}
+              className="h-6 w-6 p-0 hover:bg-muted"
+              title="复制BASE_URL"
+              disabled={!data?.ANTHROPIC_BASE_URL}
+            >
+              <Copy className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
-  ),
+    );
+  },
   listComponent: ({ item, isActive, onToggleActive, onEdit, onDelete }) => {
     const [showKey, setShowKey] = useState(false);
     const resetTrigger = useGlobalReset();
@@ -87,17 +139,22 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
       }
     }, [resetTrigger]);
     
+    // 当item数据更新时，不重置密钥显示状态，保持用户的选择
+    // This was removed to fix the issue of key visibility being reset after editing
+    
     const copyToClipboard = (text: string) => {
       navigator.clipboard.writeText(text);
       toast.success('已复制到剪贴板');
     };
 
     const copyApiKey = () => {
-      copyToClipboard(item.data.ANTHROPIC_AUTH_TOKEN);
+      if (item?.data?.ANTHROPIC_API_KEY) {
+        copyToClipboard(item.data.ANTHROPIC_API_KEY);
+      }
     };
 
     const maskApiKey = (key: string) => {
-      if (key.length <= 8) return key;
+      if (!key || key.length <= 8) return key || '';
       const start = key.slice(0, 4);
       const end = key.slice(-4);
       const middle = '*'.repeat(Math.min(key.length - 8, 20));
@@ -117,13 +174,16 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
           </div>
           
           <div className="mb-1">
-            <div className="text-xs text-muted-foreground mb-1">ANTHROPIC_AUTH_TOKEN:</div>
+            <div className="text-xs text-muted-foreground mb-1">ANTHROPIC_API_KEY:</div>
             <code className="text-xs bg-muted px-2 py-1 rounded font-mono block break-all whitespace-pre-wrap">
-              {showKey ? item.data.ANTHROPIC_AUTH_TOKEN : maskApiKey(item.data.ANTHROPIC_AUTH_TOKEN)}
+              {item?.data?.ANTHROPIC_API_KEY ? 
+                (showKey ? item.data.ANTHROPIC_API_KEY : maskApiKey(item.data.ANTHROPIC_API_KEY)) : 
+                '未设置'
+              }
             </code>
           </div>
           
-          {item.data.ANTHROPIC_BASE_URL && (
+          {item?.data?.ANTHROPIC_BASE_URL && (
             <div className="mb-1">
               <span className="text-xs text-muted-foreground">ANTHROPIC_BASE_URL: </span>
               <span className="text-xs">{item.data.ANTHROPIC_BASE_URL}</span>
@@ -159,6 +219,7 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
             onClick={copyApiKey} 
             className="h-6 w-6 p-0"
             title="复制API密钥"
+            disabled={!item?.data?.ANTHROPIC_API_KEY}
           >
             <Copy className="h-3 w-3" />
           </Button>
@@ -185,10 +246,10 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
       const { isTauri } = await import('@tauri-apps/api/core');
       if (await isTauri()) {
         const { invoke } = await import('@tauri-apps/api/core');
-        const { ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL } = data;
+        const { ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL } = data;
         await invoke('update_config_env', { 
           configPath, 
-          apiKey: ANTHROPIC_AUTH_TOKEN, 
+          apiKey: ANTHROPIC_API_KEY, 
           baseUrl: ANTHROPIC_BASE_URL
         });
       }
