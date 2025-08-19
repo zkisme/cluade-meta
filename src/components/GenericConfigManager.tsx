@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from "react";
+import { forwardRef, useImperativeHandle, useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -83,7 +83,26 @@ export const GenericConfigManager = forwardRef<any, GenericConfigManagerProps>(
 
     // Load items are handled by the useConfigManager hook
 
+    // Listen for refresh events
+    useEffect(() => {
+      const handleRefresh = () => {
+        loadItems();
+      };
+      
+      window.addEventListener('refresh-config-items', handleRefresh);
+      return () => {
+        window.removeEventListener('refresh-config-items', handleRefresh);
+      };
+    }, [loadItems]);
+
     const handleToggleActive = async (id: string) => {
+      // Check if the item is deprecated (is_active === false)
+      const item = items.find(item => item.id === id);
+      if (item && item.is_active === false) {
+        toast.error("无法启用已弃用的密钥");
+        return;
+      }
+      
       const newActiveItemId = id === activeItemId ? null : id;
       setActiveItemId(newActiveItemId);
       

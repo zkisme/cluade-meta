@@ -74,6 +74,7 @@ pub struct ApiKey {
     pub ANTHROPIC_API_KEY: String,
     pub description: Option<String>,
     pub ANTHROPIC_BASE_URL: Option<String>,
+    pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -214,6 +215,7 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             ANTHROPIC_API_KEY TEXT NOT NULL,
             description TEXT,
             ANTHROPIC_BASE_URL TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )",
@@ -288,6 +290,21 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
             "ALTER TABLE api_keys DROP COLUMN CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
             (),
         ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to migrate database schema: {}", e), rusqlite::types::Type::Null))?;
+    }
+
+    // Check if is_active column exists, add it if it doesn't
+    let has_is_active_column: Result<bool> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'is_active'",
+        [],
+        |row| row.get(0),
+    );
+
+    if let Ok(false) = has_is_active_column {
+        // Add the is_active column with default value 1 (true)
+        conn.execute(
+            "ALTER TABLE api_keys ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            (),
+        ).map_err(|e| rusqlite::Error::InvalidColumnType(0, format!("Failed to add is_active column: {}", e), rusqlite::types::Type::Null))?;
     }
 
     // Create the config_paths table if it doesn't exist
@@ -374,13 +391,14 @@ async fn create_api_key(
         ANTHROPIC_API_KEY: request.ANTHROPIC_API_KEY,
         description: request.description,
         ANTHROPIC_BASE_URL: request.ANTHROPIC_BASE_URL,
+        is_active: true,
         created_at: now.clone(),
         updated_at: now,
     };
 
     conn.execute(
-        "INSERT INTO api_keys (id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        (&api_key.id, &api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.created_at, &api_key.updated_at),
+        "INSERT INTO api_keys (id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        (&api_key.id, &api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.is_active, &api_key.created_at, &api_key.updated_at),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -390,7 +408,7 @@ async fn create_api_key(
 async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, is_active, created_at, updated_at FROM api_keys ORDER BY is_active DESC, created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
@@ -400,8 +418,9 @@ async fn get_api_keys(app: tauri::AppHandle) -> Result<Vec<ApiKey>, String> {
             ANTHROPIC_API_KEY: row.get(2)?,
             description: row.get(3)?,
             ANTHROPIC_BASE_URL: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
+            is_active: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -419,6 +438,7 @@ pub struct ConfigItem<T> {
     pub name: String,
     pub data: T,
     pub description: Option<String>,
+    pub is_active: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -433,7 +453,7 @@ pub struct ApiKeyData {
 async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<ApiKeyData>>, String> {
     let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys ORDER BY created_at DESC")
+    let mut stmt = conn.prepare("SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, is_active, created_at, updated_at FROM api_keys ORDER BY is_active DESC, created_at DESC")
         .map_err(|e| e.to_string())?;
     
     let api_keys = stmt.query_map([], |row| {
@@ -442,8 +462,9 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
         let ANTHROPIC_API_KEY: String = row.get(2)?;
         let description: Option<String> = row.get(3)?;
         let ANTHROPIC_BASE_URL: Option<String> = row.get(4)?;
-        let created_at: String = row.get(5)?;
-        let updated_at: String = row.get(6)?;
+        let is_active: bool = row.get(5)?;
+        let created_at: String = row.get(6)?;
+        let updated_at: String = row.get(7)?;
         
         Ok(ConfigItem {
             id,
@@ -453,6 +474,7 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
                 ANTHROPIC_BASE_URL,
             },
             description,
+            is_active: Some(is_active),
             created_at,
             updated_at,
         })
@@ -476,7 +498,7 @@ async fn update_api_key(
 
     // Check if the API key exists
     let existing_key: Option<ApiKey> = conn.query_row(
-        "SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys WHERE id = ?1",
+        "SELECT id, name, ANTHROPIC_API_KEY, description, ANTHROPIC_BASE_URL, is_active, created_at, updated_at FROM api_keys WHERE id = ?1",
         [&id],
         |row| {
             Ok(ApiKey {
@@ -485,8 +507,9 @@ async fn update_api_key(
                 ANTHROPIC_API_KEY: row.get(2)?,
                 description: row.get(3)?,
                 ANTHROPIC_BASE_URL: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                is_active: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         },
     ).optional().map_err(|e| e.to_string())?;
@@ -508,8 +531,8 @@ async fn update_api_key(
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "UPDATE api_keys SET name = ?1, ANTHROPIC_API_KEY = ?2, description = ?3, ANTHROPIC_BASE_URL = ?4, updated_at = ?5 WHERE id = ?6",
-        (&api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.updated_at, &id),
+        "UPDATE api_keys SET name = ?1, ANTHROPIC_API_KEY = ?2, description = ?3, ANTHROPIC_BASE_URL = ?4, is_active = ?5, updated_at = ?6 WHERE id = ?7",
+        (&api_key.name, &api_key.ANTHROPIC_API_KEY, &api_key.description, &api_key.ANTHROPIC_BASE_URL, &api_key.is_active, &api_key.updated_at, &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(api_key)
@@ -522,6 +545,18 @@ async fn delete_api_key(app: tauri::AppHandle, id: String) -> Result<bool, Strin
     let affected_rows = conn.execute(
         "DELETE FROM api_keys WHERE id = ?1",
         [&id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(affected_rows > 0)
+}
+
+#[tauri::command]
+async fn toggle_api_key_active(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+
+    let affected_rows = conn.execute(
+        "UPDATE api_keys SET is_active = NOT is_active, updated_at = ?1 WHERE id = ?2",
+        (chrono::Utc::now().to_rfc3339(), &id),
     ).map_err(|e| e.to_string())?;
 
     Ok(affected_rows > 0)
@@ -1678,6 +1713,7 @@ async fn get_route_configs_config(app: tauri::AppHandle) -> Result<Vec<ConfigIte
                 auth_required,
             },
             description,
+            is_active: None, // Route configs don't have is_active field
             created_at,
             updated_at,
         })
@@ -1903,6 +1939,7 @@ pub fn run() {
             get_api_keys_config,
             update_api_key,
             delete_api_key,
+            toggle_api_key_active,
             create_route_config,
             get_route_configs,
             get_route_configs_config,

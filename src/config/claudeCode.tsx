@@ -1,7 +1,7 @@
 import { Key, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Edit, Trash2, Copy, Eye, EyeOff } from "lucide-react";
+import { Edit, Trash2, Copy, Eye, EyeOff, PowerOff } from "lucide-react";
 import { ConfigType } from "@/types/config";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
@@ -132,6 +132,20 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
     const [showKey, setShowKey] = useState(false);
     const resetTrigger = useGlobalReset();
     
+    const handleToggleActive = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('toggle_api_key_active', { id: item.id });
+        toast.success(item.is_active ? '密钥已弃用' : '密钥已启用');
+        
+        // Trigger a refresh by dispatching a custom event
+        window.dispatchEvent(new CustomEvent('refresh-config-items'));
+      } catch (error) {
+        toast.error('操作失败');
+        console.error('Failed to toggle key active status:', error);
+      }
+    };
+    
     // 当全局重置触发时，强制重置为false
     useEffect(() => {
       if (resetTrigger > 0) { // 只有实际重置时才执行，避免初始化干扰
@@ -166,11 +180,14 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
     };
 
     return (
-      <div className="flex items-start justify-between">
+      <div className={`flex items-start justify-between ${item.is_active === false ? 'opacity-60' : ''}`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center space-x-2 mb-2">
-            <Switch checked={isActive} onCheckedChange={() => onToggleActive(item.id)} />
+            <Switch checked={isActive} onCheckedChange={() => onToggleActive(item.id)} disabled={item.is_active === false} />
             <h3 className="text-sm font-medium truncate">{item.name}</h3>
+            {item.is_active === false && (
+              <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">已弃用</span>
+            )}
           </div>
           
           <div className="mb-1">
@@ -223,6 +240,15 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
           >
             <Copy className="h-3 w-3" />
           </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleToggleActive} 
+            className={`h-6 w-6 p-0 ${item.is_active === false ? 'text-red-600 hover:text-red-700' : 'text-gray-600 hover:text-gray-700'}`}
+            title={item.is_active === false ? "启用密钥" : "弃用密钥"}
+          >
+            <PowerOff className="h-3 w-3" />
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => onEdit(item)} className="h-6 w-6 p-0">
             <Edit className="h-3 w-3" />
           </Button>
@@ -238,6 +264,7 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
     list: "get_api_keys_config",
     update: "update_api_key",
     delete: "delete_api_key",
+    toggleActive: "toggle_api_key_active",
   },
   configPath: "~/.claude/settings.json",
   onConfigUpdate: async (data: ApiKeyData, configPath: string) => {

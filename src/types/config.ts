@@ -3,6 +3,7 @@ export interface ConfigItem<T = any> {
   name: string;
   data: T;
   description?: string;
+  is_active?: boolean;
   created_at: string;
   updated_at: string;
 }
