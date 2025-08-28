@@ -167,7 +167,7 @@ export function useConfigManager<T = any>(configType: ConfigType<T>) {
       setItems(result);
       
       // 如果是Claude Code配置，重置密钥显示状态 - 但只在首次加载时，不是在编辑更新后
-      if (configType.id === 'claude-code' && !window.__claudeCodeEditingInProgress) {
+      if (configType.id === 'claude-code' && !((window as any).__claudeCodeEditingInProgress)) {
         try {
           const { resetAllKeyVisibility } = await import('@/config/claudeCode');
           resetAllKeyVisibility();

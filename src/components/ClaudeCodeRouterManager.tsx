@@ -61,6 +61,9 @@ export function ClaudeCodeRouterManager() {
   // 保存配置
   const saveConfig = async (newConfig: ClaudeCodeRouterConfig) => {
     try {
+      console.log('=== FRONTEND saveConfig called ===');
+      console.log('Config being saved:', newConfig);
+      console.log('Providers count:', newConfig.Providers?.length || 0);
       await invoke('update_router_config', { config: newConfig });
       setConfig(newConfig);
       toast.success('配置保存成功');
@@ -85,6 +88,9 @@ export function ClaudeCodeRouterManager() {
   }, []);
 
   const handleConfigChange = (newConfig: ClaudeCodeRouterConfig) => {
+    console.log('=== handleConfigChange called ===');
+    console.log('New config:', newConfig);
+    console.log('New providers count:', newConfig.Providers?.length || 0);
     saveConfig(newConfig);
   };
 

@@ -368,6 +368,33 @@ fn get_database_connection(app: &tauri::AppHandle) -> Result<Connection> {
         )",
         (),
     )?;
+
+    // Create the providers table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS providers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            api_base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            models TEXT,
+            transformer TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+
+    // Create the router_configs table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS router_configs (
+            id TEXT PRIMARY KEY,
+            config_key TEXT NOT NULL UNIQUE,
+            config_value TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
     
     Ok(conn)
 }
@@ -1243,41 +1270,169 @@ async fn get_router_config_path_with_custom(app: Option<&tauri::AppHandle>) -> s
 
 #[tauri::command]
 async fn get_router_config(app: tauri::AppHandle) -> Result<ClaudeCodeRouterConfig, String> {
-    let config_path = get_router_config_path_with_custom(Some(&app)).await;
+    println!("=== GET_ROUTER_CONFIG CALLED ===");
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
     
-    if !config_path.exists() {
-        // 返回默认配置
-        return Ok(ClaudeCodeRouterConfig {
-            anthropic_api_key: None,
-            proxy_url: None,
-            log: None,
-            host: None,
-            non_interactive_mode: None,
-            api_timeout_ms: Some(600000),
-            custom_router_path: None,
-            providers: Vec::new(),
-            router: RouterConfig {
-                default: None,
-                background: None,
-                think: None,
-                long_context: None,
-                long_context_threshold: Some(60000),
-                web_search: None,
-            },
-            transformers: None,
-        });
+    // 首先尝试从数据库读取配置
+    let mut config = ClaudeCodeRouterConfig {
+        anthropic_api_key: None,
+        proxy_url: None,
+        log: None,
+        host: None,
+        non_interactive_mode: None,
+        api_timeout_ms: Some(600000),
+        custom_router_path: None,
+        providers: Vec::new(),
+        router: RouterConfig {
+            default: None,
+            background: None,
+            think: None,
+            long_context: None,
+            long_context_threshold: Some(60000),
+            web_search: None,
+        },
+        transformers: None,
+    };
+    
+    // 从数据库读取提供商
+    let providers_result = {
+        let mut stmt = conn.prepare("SELECT name, api_base_url, api_key, models, transformer FROM providers ORDER BY created_at DESC")
+            .map_err(|e| e.to_string())?;
+        
+        let provider_rows = stmt.query_map([], |row| {
+            let models_json: String = row.get(3)?;
+            let transformer_json: Option<String> = row.get(4)?;
+            
+            let models: Vec<String> = serde_json::from_str(&models_json).unwrap_or_default();
+            let transformer: Option<Transformer> = transformer_json
+                .and_then(|json| serde_json::from_str(&json).ok());
+            
+            Ok(Provider {
+                name: row.get(0)?,
+                api_base_url: row.get(1)?,
+                api_key: row.get(2)?,
+                models,
+                transformer,
+            })
+        }).map_err(|e| e.to_string())?;
+        
+        let mut providers = Vec::new();
+        for provider_result in provider_rows {
+            match provider_result {
+                Ok(provider) => providers.push(provider),
+                Err(e) => eprintln!("Error reading provider: {}", e),
+            }
+        }
+        providers
+    };
+    
+    config.providers = providers_result;
+    println!("Loaded {} providers from database", config.providers.len());
+    
+    // 从数据库读取路由配置
+    if let Ok(Some(router_json)) = conn.query_row(
+        "SELECT config_value FROM router_configs WHERE config_key = 'router'",
+        [],
+        |row| row.get::<_, String>(0),
+    ).optional() {
+        if let Ok(router) = serde_json::from_str::<RouterConfig>(&router_json) {
+            config.router = router;
+        }
     }
     
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config file: {}", e))?;
+    // 读取其他全局配置
+    if let Ok(Some(api_key)) = conn.query_row(
+        "SELECT config_value FROM router_configs WHERE config_key = 'anthropic_api_key'",
+        [],
+        |row| row.get::<_, String>(0),
+    ).optional() {
+        config.anthropic_api_key = Some(api_key);
+    }
     
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config file: {}", e))
+    if let Ok(Some(proxy_url)) = conn.query_row(
+        "SELECT config_value FROM router_configs WHERE config_key = 'proxy_url'",
+        [],
+        |row| row.get::<_, String>(0),
+    ).optional() {
+        config.proxy_url = Some(proxy_url);
+    }
+    
+    // 如果数据库中没有数据，尝试从文件读取并同步到数据库
+    if config.providers.is_empty() {
+        let config_path = get_router_config_path_with_custom(Some(&app)).await;
+        
+        if config_path.exists() {
+            let content = fs::read_to_string(&config_path)
+                .map_err(|e| format!("Failed to read config file: {}", e))?;
+            
+            if let Ok(file_config) = serde_json::from_str::<ClaudeCodeRouterConfig>(&content) {
+                // 同步文件配置到数据库
+                update_router_config(app, file_config.clone()).await?;
+                return Ok(file_config);
+            }
+        }
+    }
+    
+    Ok(config)
 }
 
 #[tauri::command] 
 async fn update_router_config(app: tauri::AppHandle, config: ClaudeCodeRouterConfig) -> Result<bool, String> {
+    println!("=== UPDATE_ROUTER_CONFIG CALLED ===");
+    println!("Saving {} providers to database", config.providers.len());
     let config_path = get_router_config_path_with_custom(Some(&app)).await;
+    
+    // 同时保存到数据库和文件
+    let conn = get_database_connection(&app).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    
+    // 保存提供商到数据库
+    // 先删除所有现有的提供商
+    conn.execute("DELETE FROM providers", ()).map_err(|e| e.to_string())?;
+    
+    // 插入新的提供商
+    for provider in &config.providers {
+        let provider_id = uuid::Uuid::new_v4().to_string();
+        let models_json = serde_json::to_string(&provider.models).unwrap_or_else(|_| "[]".to_string());
+        let transformer_json = provider.transformer.as_ref()
+            .map(|t| serde_json::to_string(t).unwrap_or_else(|_| "null".to_string()));
+        
+        conn.execute(
+            "INSERT INTO providers (id, name, api_base_url, api_key, models, transformer, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (&provider_id, &provider.name, &provider.api_base_url, &provider.api_key, &models_json, &transformer_json, &now, &now),
+        ).map_err(|e| e.to_string())?;
+    }
+    
+    // 保存路由配置到数据库
+    let router_json = serde_json::to_string(&config.router).map_err(|e| e.to_string())?;
+    
+    // 删除旧的router配置，然后插入新的
+    conn.execute("DELETE FROM router_configs WHERE config_key = 'router'", ()).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO router_configs (id, config_key, config_value, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        (uuid::Uuid::new_v4().to_string(), "router", router_json, now.clone(), now.clone()),
+    ).map_err(|e| e.to_string())?;
+    
+    // 保存其他全局配置
+    if let Some(api_key) = &config.anthropic_api_key {
+        conn.execute("DELETE FROM router_configs WHERE config_key = 'anthropic_api_key'", ()).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO router_configs (id, config_key, config_value, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (uuid::Uuid::new_v4().to_string(), "anthropic_api_key", api_key, now.clone(), now.clone()),
+        ).map_err(|e| e.to_string())?;
+    } else {
+        conn.execute("DELETE FROM router_configs WHERE config_key = 'anthropic_api_key'", ()).map_err(|e| e.to_string())?;
+    }
+    
+    if let Some(proxy_url) = &config.proxy_url {
+        conn.execute("DELETE FROM router_configs WHERE config_key = 'proxy_url'", ()).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO router_configs (id, config_key, config_value, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (uuid::Uuid::new_v4().to_string(), "proxy_url", proxy_url, now.clone(), now.clone()),
+        ).map_err(|e| e.to_string())?;
+    } else {
+        conn.execute("DELETE FROM router_configs WHERE config_key = 'proxy_url'", ()).map_err(|e| e.to_string())?;
+    }
     
     // 创建目录（如果不存在）
     if let Some(parent) = config_path.parent() {

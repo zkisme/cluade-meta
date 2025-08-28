@@ -264,7 +264,6 @@ export const claudeCodeConfigType: ConfigType<ApiKeyData> = {
     list: "get_api_keys_config",
     update: "update_api_key",
     delete: "delete_api_key",
-    toggleActive: "toggle_api_key_active",
   },
   configPath: "~/.claude/settings.json",
   onConfigUpdate: async (data: ApiKeyData, configPath: string) => {

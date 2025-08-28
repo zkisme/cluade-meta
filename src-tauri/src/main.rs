@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    config_meta_lib::run()
+    claude_meta_lib::run()
 }

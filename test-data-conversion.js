@@ -5,7 +5,7 @@ import { execSync } from 'child_process';
 
 try {
   // Test the new API endpoint
-  const result = execSync('sqlite3 "/Users/kay/Library/Application Support/com.config-meta.app/api_keys/claude_keys.db" "SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys LIMIT 1;"', { encoding: 'utf8' });
+  const result = execSync('sqlite3 "/Users/kay/Library/Application Support/com.claude-meta.app/api_keys/claude_keys.db" "SELECT id, name, ANTHROPIC_AUTH_TOKEN, description, ANTHROPIC_BASE_URL, created_at, updated_at FROM api_keys LIMIT 1;"', { encoding: 'utf8' });
   
   console.log('Raw database data:');
   console.log(result);

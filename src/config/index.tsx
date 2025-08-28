@@ -6,5 +6,5 @@ export { routerConfigType } from "./router";
 
 export const configTypes = [
   claudeCodeConfigType,
-  routerConfigType,
+  // Temporarily hidden: routerConfigType,
 ] as const;

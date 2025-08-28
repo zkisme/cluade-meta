@@ -146,7 +146,7 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
         <div>
           <h1 className="text-2xl font-bold tracking-tight">配置管理概览</h1>
           <p className="text-muted-foreground mt-1">
-            Config Meta - Claude Code 桌面配置管理器
+            Claude Meta - Claude Code 桌面配置管理器
           </p>
         </div>
       </div>
@@ -236,13 +236,13 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
           <div className="text-center space-y-3">
             <div className="flex items-center justify-center space-x-2">
               <Settings className="h-6 w-6 text-muted-foreground" />
-              <span className="text-xl font-semibold">Config Meta</span>
+              <span className="text-xl font-semibold">Claude Meta</span>
             </div>
             <p className="text-muted-foreground">
               基于 Tauri + React 的桌面配置管理工具
             </p>
             <div className="flex items-center justify-center space-x-4 text-sm text-muted-foreground">
-              <span>版本 1.0.0</span>
+              <span>版本 0.1.0</span>
               <span>•</span>
               <span>开源项目</span>
               <span>•</span>
