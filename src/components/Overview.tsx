@@ -18,7 +18,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 interface OverviewProps {
-  onNavigate: (view: string) => void;
+  onNavigate: (view: 'overview' | 'claude-code' | 'claude-router') => void;
   installedFeatures?: FeatureStatus[];
   onFeatureInstalled?: () => void;
 }
@@ -102,7 +102,7 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
     }
     
     return {
-      id: feature.feature_id,
+      id: feature.feature_id as 'claude-code' | 'claude-router',
       title: configType.displayName,
       description: feature.description,
       icon,
@@ -112,7 +112,7 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
       canInstall: feature.can_install,
       isInstalling: installing.has(feature.feature_id),
     };
-  }).filter(Boolean);
+  }).filter((config): config is NonNullable<typeof config> => config !== null);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
