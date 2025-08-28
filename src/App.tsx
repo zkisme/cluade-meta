@@ -103,11 +103,6 @@ function AppContent() {
     }
   };
 
-  const handleOpenAdvancedEdit = () => {
-    if (apiKeyManagerRef.current) {
-      apiKeyManagerRef.current.onOpenAdvancedEdit?.();
-    }
-  };
 
   const handleFeatureInstalled = async () => {
     // Refresh feature list when a feature is installed
