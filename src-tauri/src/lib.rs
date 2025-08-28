@@ -486,9 +486,9 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
     let api_keys = stmt.query_map([], |row| {
         let id: String = row.get(0)?;
         let name: String = row.get(1)?;
-        let ANTHROPIC_API_KEY: String = row.get(2)?;
+        let anthropic_api_key: String = row.get(2)?;
         let description: Option<String> = row.get(3)?;
-        let ANTHROPIC_BASE_URL: Option<String> = row.get(4)?;
+        let anthropic_base_url: Option<String> = row.get(4)?;
         let is_active: bool = row.get(5)?;
         let created_at: String = row.get(6)?;
         let updated_at: String = row.get(7)?;
@@ -497,8 +497,8 @@ async fn get_api_keys_config(app: tauri::AppHandle) -> Result<Vec<ConfigItem<Api
             id,
             name,
             data: ApiKeyData {
-                ANTHROPIC_API_KEY,
-                ANTHROPIC_BASE_URL,
+                ANTHROPIC_API_KEY: anthropic_api_key,
+                ANTHROPIC_BASE_URL: anthropic_base_url,
             },
             description,
             is_active: Some(is_active),
@@ -546,14 +546,14 @@ async fn update_api_key(
     if let Some(name) = request.name {
         api_key.name = name;
     }
-    if let Some(ANTHROPIC_API_KEY) = request.ANTHROPIC_API_KEY {
-        api_key.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
+    if let Some(anthropic_api_key) = request.ANTHROPIC_API_KEY {
+        api_key.ANTHROPIC_API_KEY = anthropic_api_key;
     }
     if let Some(description) = request.description {
         api_key.description = Some(description);
     }
-    if let Some(ANTHROPIC_BASE_URL) = request.ANTHROPIC_BASE_URL {
-        api_key.ANTHROPIC_BASE_URL = Some(ANTHROPIC_BASE_URL);
+    if let Some(anthropic_base_url) = request.ANTHROPIC_BASE_URL {
+        api_key.ANTHROPIC_BASE_URL = Some(anthropic_base_url);
     }
     api_key.updated_at = chrono::Utc::now().to_rfc3339();
 
