@@ -11,6 +11,7 @@ use crate::commands::backup;
 use crate::commands::router;
 use crate::commands::route_config;
 use crate::commands::utils;
+use crate::commands::ide;
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,6 +72,7 @@ pub fn run() {
             project::scan_projects,
             utils::open_in_explorer,
             utils::open_in_terminal,
+            ide::open_with_ide,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
