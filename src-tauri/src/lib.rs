@@ -3,8 +3,10 @@
 mod db;
 mod models;
 mod commands;
+use tauri::Manager;
 use crate::commands::api_keys;
 use crate::commands::project;
+use crate::commands::project_db;
 use crate::commands::config_path;
 use crate::commands::config;
 use crate::commands::backup;
@@ -12,6 +14,7 @@ use crate::commands::router;
 use crate::commands::route_config;
 use crate::commands::utils;
 use crate::commands::ide;
+use crate::commands::category::{self, CustomCategoryStore};
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,7 +23,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|_app| {
+        .manage(CustomCategoryStore::default()) // Add this line
+        .setup(|app| {
+            // 初始化CustomCategoryStore
+            let store = app.state::<CustomCategoryStore>();
+            if let Err(e) = store.inner().init(&app.handle()) {
+                eprintln!("Failed to initialize CustomCategoryStore: {}", e);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -69,11 +78,21 @@ pub fn run() {
             router::save_raw_router_config,
             utils::check_feature_status,
             utils::install_feature,
-            project::scan_projects,
+            project::scan_and_save_projects,
+            project_db::create_project,
+            project_db::get_projects,
+            project_db::get_project_by_id,
+            project_db::update_project,
+            project_db::delete_project,
+            project_db::get_projects_by_category,
+            project_db::clear_all_projects,
             utils::open_in_explorer,
             utils::open_in_terminal,
             ide::open_with_ide,
-        ])
+            category::add_custom_category,
+            category::get_custom_categories,
+            category::delete_custom_category,
+            ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Project, CustomCategory } from '@/types/project';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Trash2, MoreVertical } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -28,21 +28,29 @@ interface CategoryFilterProps {
   onSelectCategory: (category: string | null) => void;
   selectedCategory: string | null;
   customCategories: CustomCategory[];
+  onDeleteCategory?: (categoryName: string) => void;
 }
 
 interface CategoryItem {
   id: string;
   name: string;
+  isCustom?: boolean;
 }
 
 function SortableCategoryItem({ 
   item, 
   isSelected, 
-  onClick 
+  onClick,
+  onDelete,
+  hoveredItem,
+  setHoveredItem
 }: { 
   item: CategoryItem; 
   isSelected: boolean; 
   onClick: () => void;
+  onDelete?: () => void;
+  hoveredItem: string | null;
+  setHoveredItem: (id: string | null) => void;
 }) {
   const {
     attributes,
@@ -63,7 +71,9 @@ function SortableCategoryItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="relative"
+      className="relative group"
+      onMouseEnter={() => setHoveredItem(item.id)}
+      onMouseLeave={() => setHoveredItem(null)}
     >
       <div
         className={`w-full justify-start flex items-center gap-2 transition-all duration-200 p-2 rounded-md cursor-pointer ${
@@ -83,10 +93,23 @@ function SortableCategoryItem({
         
         <span className="flex-1 text-left">{item.name}</span>
         
-        {isSelected && (
-          <Badge variant="outline" className="ml-auto">
-            已选择
-          </Badge>
+        {/* 操作区 - hover时显示 */}
+        {item.isCustom && (
+          <div className={`opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
+            hoveredItem === item.id ? 'opacity-100' : 'opacity-0'
+          }`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete?.();
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
         )}
       </div>
     </div>
@@ -98,21 +121,36 @@ export function CategoryFilter({
   onSelectCategory,
   selectedCategory,
   customCategories,
+  onDeleteCategory,
 }: CategoryFilterProps) {
   // 获取所有分类并去重
-  const allCategories = [
+  const allCategories = useMemo(() => [
     ...projects.map((project) => project.category),
     ...customCategories.map((cat) => cat.name),
-  ];
-  const uniqueCategories = Array.from(new Set(allCategories));
+  ], [projects, customCategories]);
+  
+  const uniqueCategories = useMemo(() => Array.from(new Set(allCategories)), [allCategories]);
   
   // 转换为分类项格式
-  const initialItems: CategoryItem[] = uniqueCategories.map((category, index) => ({
+  const initialItems: CategoryItem[] = useMemo(() => uniqueCategories.map((category, index) => ({
     id: `category-${index}`,
     name: category,
-  }));
+    isCustom: customCategories.some(cat => cat.name === category),
+  })), [uniqueCategories, customCategories]);
   
   const [items, setItems] = useState<CategoryItem[]>(initialItems);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+
+  // 当分类数据变化时，更新items状态
+  useEffect(() => {
+    setItems(initialItems);
+  }, [initialItems]);
+
+  const handleDeleteCategory = (categoryName: string) => {
+    if (confirm(`确定要删除分类"${categoryName}"吗？`)) {
+      onDeleteCategory?.(categoryName);
+    }
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -160,6 +198,9 @@ export function CategoryFilter({
                 item={item}
                 isSelected={selectedCategory === item.name}
                 onClick={() => onSelectCategory(item.name)}
+                onDelete={item.isCustom ? () => handleDeleteCategory(item.name) : undefined}
+                hoveredItem={hoveredItem}
+                setHoveredItem={setHoveredItem}
               />
             ))}
           </div>
