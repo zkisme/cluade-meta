@@ -147,7 +147,7 @@ export function CategoryFilter({
   }, [initialItems]);
 
   const handleDeleteCategory = (categoryName: string) => {
-    if (confirm(`确定要删除分类"${categoryName}"吗？`)) {
+    if (confirm(`确定要删除分类"${categoryName}"吗？\n\n注意：如果该分类下有项目，将同时删除相关项目记录。`)) {
       onDeleteCategory?.(categoryName);
     }
   };

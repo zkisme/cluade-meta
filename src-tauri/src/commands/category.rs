@@ -126,3 +126,47 @@ pub async fn delete_custom_category(
     }
 }
 
+#[command]
+pub async fn delete_custom_category_with_projects(
+    name: String,
+    app: tauri::AppHandle,
+) -> Result<(bool, usize), String> {
+        
+    let mut conn = db::get_database_connection(&app).map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    // 开始事务
+    let tx = conn.transaction().map_err(|e| format!("Failed to start transaction: {}", e))?;
+    
+    // 检查分类是否存在
+    let category_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM project_categories WHERE name = ?)",
+        [&name],
+        |row| row.get(0),
+    ).map_err(|e| format!("Failed to check if category exists: {}", e))?;
+    
+    if !category_exists {
+        return Err(format!("Category '{}' not found.", name));
+    }
+    
+    // 删除该分类下的所有项目
+    let projects_deleted = tx.execute(
+        "DELETE FROM projects WHERE category = ?",
+        [&name],
+    ).map_err(|e| format!("Failed to delete projects: {}", e))?;
+    
+    // 删除分类
+    let category_deleted = tx.execute(
+        "DELETE FROM project_categories WHERE name = ?",
+        [&name],
+    ).map_err(|e| format!("Failed to delete category: {}", e))?;
+    
+    // 提交事务
+    tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+    
+    if category_deleted > 0 {
+        Ok((true, projects_deleted))
+    } else {
+        Err(format!("Category '{}' not found.", name))
+    }
+}
+

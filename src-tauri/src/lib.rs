@@ -92,6 +92,7 @@ pub fn run() {
             category::add_custom_category,
             category::get_custom_categories,
             category::delete_custom_category,
+            category::delete_custom_category_with_projects,
             ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

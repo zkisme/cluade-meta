@@ -208,12 +208,27 @@ export function ProjectManagement() {
     try {
       // 检查是否有项目使用此分类
       const projectsInCategory = projects.filter(p => p.category === categoryName);
+      
       if (projectsInCategory.length > 0) {
-        alert(`无法删除分类"${categoryName}"，因为还有 ${projectsInCategory.length} 个项目使用此分类。`);
-        return;
+        // 显示确认对话框
+        const confirmDelete = confirm(
+          `确定要删除分类"${categoryName}"吗？\n\n此操作将同时删除 ${projectsInCategory.length} 个相关项目记录，但不会影响本地项目文件。`
+        );
+        
+        if (!confirmDelete) {
+          return; // 用户取消删除
+        }
+        
+        // 级联删除分类和相关项目
+        await invoke("delete_custom_category_with_projects", { name: categoryName });
+        
+        // 刷新项目列表
+        loadProjects();
+      } else {
+        // 没有项目，直接删除分类
+        await invoke("delete_custom_category", { name: categoryName });
       }
       
-      await invoke("delete_custom_category", { name: categoryName });
       fetchCustomCategories(); // Refresh the list
       
       // 如果当前选中的是被删除的分类，清除选择

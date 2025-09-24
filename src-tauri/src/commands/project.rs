@@ -168,9 +168,27 @@ pub async fn scan_and_save_projects(app: AppHandle, path: String, options: ScanO
         }
     }
 
-    // Clear existing projects and save new ones
-    let _ = crate::commands::project_db::clear_all_projects(app.clone());
-    let saved_projects = bulk_create_projects(app, projects)?;
+    // Get existing projects to avoid duplicates
+    let existing_projects = get_projects(app.clone())?;
+    let existing_paths: std::collections::HashSet<String> = existing_projects
+        .iter()
+        .map(|p| p.path.clone())
+        .collect();
     
-    Ok(saved_projects)
+    // Filter out projects that already exist
+    let new_projects: Vec<CreateProjectRequest> = projects
+        .into_iter()
+        .filter(|p| !existing_paths.contains(&p.path))
+        .collect();
+    
+    // Save only new projects
+    let _saved_projects = if !new_projects.is_empty() {
+        bulk_create_projects(app.clone(), new_projects)?
+    } else {
+        Vec::new()
+    };
+    
+    // Return all projects (existing + new)
+    let all_projects = get_projects(app.clone())?;
+    Ok(all_projects)
 }
