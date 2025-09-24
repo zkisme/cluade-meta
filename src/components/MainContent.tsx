@@ -3,10 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Code, Home, Settings } from "lucide-react";
 import { GenericConfigManager } from "@/components/GenericConfigManager";
 import { Overview } from "@/components/Overview";
+import { ProjectManagement } from "@/components/ProjectManagement";
 import { configTypes } from "@/config/index";
 import { FeatureStatus } from "@/services/featureDetection";
 
-type ActiveView = 'overview' | 'claude-code' | 'claude-router';
+type ActiveView = 'overview' | 'project-management' | 'claude-code' | 'claude-router';
 
 interface MainContentProps {
   activeView: ActiveView;
@@ -34,6 +35,9 @@ export function MainContent({ activeView, apiKeyManagerRef, onNavigate, installe
         break;
       case 'claude-router':
         updateTitle('Claude Code Router');
+        break;
+      case 'project-management':
+        updateTitle('项目管理');
         break;
       default:
         updateTitle('概览');
@@ -66,12 +70,10 @@ export function MainContent({ activeView, apiKeyManagerRef, onNavigate, installe
     }
     
     switch (activeView) {
+      case 'project-management':
+        return <ProjectManagement />;
       default:
-        return <Overview 
-          onNavigate={onNavigate || (() => {})} 
-          installedFeatures={installedFeatures}
-          onFeatureInstalled={onFeatureInstalled}
-        />;
+        return <Overview />;
     }
   };
 

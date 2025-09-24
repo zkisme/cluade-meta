@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Outlet } from "@tanstack/react-router";
 import { MainContent } from "@/components/MainContent";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -30,18 +31,18 @@ import {
 import { Settings, Home, FolderOpen } from "lucide-react";
 import { ConfigPathManager } from "@/components/ConfigPathManager";
 import { featureDetection, FeatureStatus } from "@/services/featureDetection";
+import { Link } from "@tanstack/react-router";
 
 import { configTypes } from "@/config/index";
 
-type ActiveView = "overview" | "claude-code" | "claude-router";
-
 function AppContent() {
-  const [activeView, setActiveView] = useState<ActiveView>("overview");
   const apiKeyManagerRef = useRef<any>(null);
   const [showConfigPathManager, setShowConfigPathManager] = useState(false);
-  const [installedFeatures, setInstalledFeatures] = useState<FeatureStatus[]>([]);
+  const [installedFeatures, setInstalledFeatures] = useState<FeatureStatus[]>(
+    []
+  );
   const [loading, setLoading] = useState(true);
-  
+
   // Check installed features on component mount
   useEffect(() => {
     const checkFeatures = async () => {
@@ -49,70 +50,33 @@ function AppContent() {
         const features = await featureDetection.getInstalledFeatures();
         setInstalledFeatures(features);
       } catch (error) {
-        console.error('Failed to check installed features:', error);
+        console.error("Failed to check installed features:", error);
       } finally {
         setLoading(false);
       }
     };
-    
+
     checkFeatures();
   }, []);
-  
+
   // Filter config types to only show installed features
-  const availableConfigTypes = configTypes.filter(configType => {
+  const availableConfigTypes = configTypes.filter((configType) => {
     // Check if the feature is installed
-    return installedFeatures.some(feature => feature.feature_id === configType.id);
+    return installedFeatures.some(
+      (feature) => feature.feature_id === configType.id
+    );
   });
-  
+
   // Sort available config types by feature name
   const sortedConfigTypes = availableConfigTypes.sort((a, b) => {
     return a.displayName.localeCompare(b.displayName);
   });
 
-  const items = sortedConfigTypes.map(configType => ({
+  const items = sortedConfigTypes.map((configType) => ({
     title: configType.displayName,
     key: configType.id,
     icon: configType.icon,
   }));
-  
-  const handleMenuClick = (key: string) => {
-    setActiveView(key as ActiveView);
-  };
-
-  const handleOpenCreateDialog = () => {
-    if (apiKeyManagerRef.current) {
-      apiKeyManagerRef.current.onOpenCreateDialog?.();
-    }
-  };
-
-  const handleViewConfig = () => {
-    if (apiKeyManagerRef.current) {
-      apiKeyManagerRef.current.onViewConfig?.();
-    }
-  };
-
-  const handleBackup = () => {
-    if (apiKeyManagerRef.current) {
-      apiKeyManagerRef.current.onBackup?.();
-    }
-  };
-
-  const handleRestore = () => {
-    if (apiKeyManagerRef.current) {
-      apiKeyManagerRef.current.onRestore?.();
-    }
-  };
-
-
-  const handleFeatureInstalled = async () => {
-    // Refresh feature list when a feature is installed
-    try {
-      const features = await featureDetection.getInstalledFeatures(true); // Force refresh
-      setInstalledFeatures(features);
-    } catch (error) {
-      console.error('Failed to refresh installed features:', error);
-    }
-  };
 
   return (
     <div className="flex h-screen w-full">
@@ -134,15 +98,31 @@ function AppContent() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={activeView === "overview"}
-                    onClick={() => setActiveView("overview")}
-                  >
-                    <a href="#" className="flex items-center gap-2">
+                  <SidebarMenuButton asChild>
+                    <Link
+                      to="/"
+                      className="flex items-center gap-2"
+                      activeProps={{
+                        className: "bg-secondary text-secondary-foreground",
+                      }}
+                    >
                       <Home />
                       <span>概览</span>
-                    </a>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link
+                      to="/project-management"
+                      className="flex items-center gap-2"
+                      activeProps={{
+                        className: "bg-secondary text-secondary-foreground",
+                      }}
+                    >
+                      <FolderOpen />
+                      <span>项目管理</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -155,15 +135,17 @@ function AppContent() {
               <SidebarMenu>
                 {items.map((item) => (
                   <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={activeView === item.key}
-                      onClick={() => handleMenuClick(item.key)}
-                    >
-                      <a href="#" className="flex items-center gap-2">
+                    <SidebarMenuButton asChild>
+                      <Link
+                        to={`/config/${item.key}`}
+                        className="flex items-center gap-2"
+                        activeProps={{
+                          className: "bg-secondary text-secondary-foreground",
+                        }}
+                      >
                         <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>
-                      </a>
+                      </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -174,28 +156,13 @@ function AppContent() {
         <SidebarRail />
       </Sidebar>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <h1 className="text-xl font-semibold" id="main-title">
-              概览
-            </h1>
-          </div>
-        </header>
-
-        <MainContent
-          activeView={activeView}
-          apiKeyManagerRef={apiKeyManagerRef}
-          onNavigate={(view) => setActiveView(view)}
-          installedFeatures={installedFeatures}
-          onFeatureInstalled={handleFeatureInstalled}
-          onOpenCreateDialog={handleOpenCreateDialog}
-        />
+      <main className="flex flex-1 flex-col overflow-hidden p-6">
+        <Outlet />
       </main>
-      
-      <ConfigPathManager 
-        open={showConfigPathManager} 
-        onOpenChange={setShowConfigPathManager} 
+
+      <ConfigPathManager
+        open={showConfigPathManager}
+        onOpenChange={setShowConfigPathManager}
       />
     </div>
   );

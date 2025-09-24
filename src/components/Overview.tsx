@@ -17,29 +17,27 @@ import { FeatureStatus, featureDetection } from "@/services/featureDetection";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
-interface OverviewProps {
-  onNavigate: (view: 'overview' | 'claude-code' | 'claude-router') => void;
-  installedFeatures?: FeatureStatus[];
-  onFeatureInstalled?: () => void;
-}
+import { Link } from '@tanstack/react-router';
 
-export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalled }: OverviewProps) {
+interface OverviewProps {}
+
+export function Overview({}: OverviewProps) {
   const [allFeatures, setAllFeatures] = useState<FeatureStatus[]>([]);
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   
+  const fetchAllFeatures = async () => {
+    try {
+      const features = await featureDetection.checkAllFeatures();
+      setAllFeatures(features);
+    } catch (error) {
+      console.error('Failed to fetch feature status:', error);
+    }
+  };
+
   // Fetch all features (including uninstalled ones) on component mount
   useEffect(() => {
-    const fetchAllFeatures = async () => {
-      try {
-        const features = await featureDetection.checkAllFeatures();
-        setAllFeatures(features);
-      } catch (error) {
-        console.error('Failed to fetch feature status:', error);
-      }
-    };
-    
     fetchAllFeatures();
-  }, [installedFeatures]);
+  }, []);
   
   const handleInstallFeature = async (featureId: string) => {
     try {
@@ -51,9 +49,7 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
       toast.success(`${getFeatureDisplayName(featureId)} 安装成功！`);
       
       // Refresh features
-      if (onFeatureInstalled) {
-        onFeatureInstalled();
-      }
+      fetchAllFeatures();
     } catch (error) {
       console.error('Failed to install feature:', error);
       toast.error(`安装 ${getFeatureDisplayName(featureId)} 失败`);
@@ -148,6 +144,11 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
           <p className="text-muted-foreground mt-1">
             Claude Meta - Claude Code 桌面配置管理器
           </p>
+          <div className="flex items-center gap-2 mt-2 overflow-hidden flex-nowrap">
+            <Badge variant="outline" className="bg-blue-100 text-blue-800">React</Badge>
+            <Badge variant="outline" className="bg-purple-100 text-purple-800">Tauri</Badge>
+            <Badge variant="outline" className="bg-sky-100 text-sky-800">Tailwind CSS</Badge>
+          </div>
         </div>
       </div>
 
@@ -158,16 +159,11 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
           const isInstalled = config.status === "installed";
           const canNavigate = isInstalled;
           
-          return (
+          const cardContent = (
             <Card 
               key={config.id}
               className={`transition-all border-l-4 ${canNavigate ? 'cursor-pointer hover:shadow-lg hover:scale-[1.02]' : 'opacity-80'}`}
               style={{ borderLeftColor: config.color.includes('blue') ? '#2563eb' : config.color.includes('green') ? '#16a34a' : '#6b7280' }}
-              onClick={() => {
-                if (canNavigate) {
-                  onNavigate(config.id);
-                }
-              }}
             >
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -227,6 +223,8 @@ export function Overview({ onNavigate, installedFeatures = [], onFeatureInstalle
               </CardContent>
             </Card>
           );
+
+          return canNavigate ? <Link to={`/config/${config.id}`}>{cardContent}</Link> : <div>{cardContent}</div>;
         })}
       </div>
 
